@@ -1,0 +1,18 @@
+{
+  "model": "smolvla",
+  "checkpoint": "smolvla_libero",
+  "gpu": "NVIDIA A10",
+  "technique": "fp32",
+  "p50_ms": 443.38108825683594,
+  "p99_ms": 463.3503723144531,
+  "jitter_ms": 11.078537443016495,
+  "hz": 2.1581940141862,
+  "peak_mb": 2509.389312,
+  "success": 76.0,
+  "ci_low": 66.76766365018553,
+  "ci_high": 83.30867444305122,
+  "episodes": 100,
+  "date": "2026-11-03",
+  "lerobot_version": "0.6.2",
+  "git_sha": "b56aa3f"
+}
