@@ -1,0 +1,32 @@
+[project]
+name = "onl-bench"
+version = "0.1.0"
+description = "Speed + LIBERO success benchmarks for VLA policies, one JSON row per run."
+requires-python = ">=3.12"
+dependencies = [
+    "modal>=1.3",
+]
+
+# GPU-side deps (torch, numpy, lerobot) live in the Modal image, not here.
+# `dev` is only what we need to run the harness's pure-Python parts and lint locally.
+[dependency-groups]
+dev = [
+    "numpy>=1.26",
+    "torch>=2.4",
+    "ruff>=0.6",
+    "pytest>=8",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.setuptools]
+py-modules = ["modal_app"]
+packages = ["bench"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
