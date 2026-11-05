@@ -46,7 +46,7 @@ size, which `compile_s` does not cover.
 | `bench/speed.py` | run the speed benchmark under one technique |
 | `bench/success.py` | run the LIBERO eval, read `eval_info.json` |
 | `bench/_eval_entry.py` | wrapper that drives lerobot-eval precision per technique |
-| `bench/row.py` | build + validate + write the 19-field result row |
+| `bench/row.py` | build + validate + write the 21-field result row |
 | `modal_app.py` | Modal app + `modal run` entrypoint |
 
 ## One GPU
@@ -56,9 +56,9 @@ lands on anything else stops before measuring. Modal's `A10` served both an `NVI
 and an `NVIDIA A10G` with no way to choose, about 27% apart on the same pi05 work.
 
 Success does not depend on the card. `scripts/merge_speed_rows.py` keeps the success
-fields of rows evaluated before the pin and takes everything else, including `gpu`, `date`
-and `git_sha`, from a speed-only L40S run. So `gpu` describes the speed numbers; where the
-success numbers ran is in the git history of the row.
+fields of rows evaluated before the pin and takes everything else from a speed-only L40S
+run. So `gpu` and `git_sha` say where a row's speed came from, and `success_gpu` and
+`success_git_sha` say where its success came from.
 
 ## Precision & lerobot-eval
 

@@ -2,8 +2,9 @@
 
 Each speed-only row (`episodes` 0) must have exactly one evaluated partner with the same
 model, checkpoint and technique, and both must have run the same settings. The merged row
-takes its success fields from the partner and everything else from the speed run, then
-replaces both files. Nothing is written or removed unless every pair is valid.
+takes its success fields, including where they ran, from the partner and everything else
+from the speed run, then replaces both files. Nothing is written or removed unless every
+pair is valid.
 
     python scripts/merge_speed_rows.py results/
 """
@@ -20,7 +21,7 @@ from bench.row import require_pinned_gpu, validate_row, write_row  # noqa: E402
 
 _KEY = ("model", "checkpoint", "technique")
 _MUST_MATCH = ("denoise_steps", "n_action_steps", "lerobot_version")
-_SUCCESS = ("success", "ci_low", "ci_high", "episodes")
+_SUCCESS = ("success", "ci_low", "ci_high", "episodes", "success_gpu", "success_git_sha")
 
 
 def merge_all(results_dir: str | Path) -> None:

@@ -1,9 +1,12 @@
-"""Add denoise_steps, n_action_steps and compile_s to rows written before they existed.
+"""Add denoise_steps, n_action_steps, compile_s, success_gpu and success_git_sha to rows
+written before they existed.
 
 Those rows ran each checkpoint's stored config, so the step counts are read from that
 checkpoint's config.json on the Hub (applying any ModelSpec override), never typed.
 compile_s is null: they ran uncompiled, and validate_row rejects a compiled row without
-a measured value. Leaves everything already in a row untouched; complete rows are skipped.
+a measured value. Until now one run produced a whole row, so its success came from the
+row's own gpu and git_sha. Leaves everything already in a row untouched; complete rows are
+skipped. Run this before merge_speed_rows.py.
 
     python scripts/backfill_speed_knobs.py results/
 """
@@ -33,7 +36,12 @@ def stored_knobs(spec: ModelSpec) -> dict:
 
 def backfill(row: dict, knobs: dict) -> dict:
     """The row with any missing `knobs` added, in schema order."""
-    merged = {"compile_s": None, **knobs, **row}
+    evaluated = row["episodes"] > 0
+    origin = {
+        "success_gpu": row["gpu"] if evaluated else None,
+        "success_git_sha": row["git_sha"] if evaluated else None,
+    }
+    merged = {"compile_s": None, **knobs, **origin, **row}
     return validate_row({field: merged[field] for field in FIELDS})
 
 

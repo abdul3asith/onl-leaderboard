@@ -61,6 +61,7 @@ def test_build_row_with_success():
     )
     assert set(r) == set(row.FIELDS)
     assert r["success"] == 78.0 and r["episodes"] == 100
+    assert r["success_gpu"] == "NVIDIA A10G" and r["success_git_sha"] == "abc1234"
     assert r["hz"] == 500.0
 
 
@@ -80,6 +81,7 @@ def test_build_row_speed_only():
         git_sha="abc1234",
     )
     assert r["success"] is None and r["episodes"] == 0
+    assert r["success_gpu"] is None and r["success_git_sha"] is None
 
 
 def test_validate_row_rejects_missing_and_nonnumeric():
@@ -322,10 +324,66 @@ def test_backfill_adds_knobs_in_schema_order_and_keeps_measurements():
         git_sha="sha",
     )
     del old["denoise_steps"], old["n_action_steps"], old["compile_s"]
+    del old["success_gpu"], old["success_git_sha"]
     new = backfill(old, {"denoise_steps": 10, "n_action_steps": 1})
     assert list(new) == list(row.FIELDS)
     assert {k: new[k] for k in old} == old
     assert new["compile_s"] is None
+    assert new["success_gpu"] is None and new["success_git_sha"] is None  # speed-only
+
+
+def test_backfill_takes_success_origin_from_the_rows_own_run():
+    from scripts.backfill_speed_knobs import backfill
+
+    old = {
+        **_row_with_compile_s("native", None),
+        "gpu": "NVIDIA A10",
+        "git_sha": "b56aa3f",
+        "success": 75.0,
+        "ci_low": 65.0,
+        "ci_high": 82.0,
+        "episodes": 100,
+    }
+    del old["success_gpu"], old["success_git_sha"]
+    new = backfill(old, {"denoise_steps": 10, "n_action_steps": 1})
+    assert new["success_gpu"] == "NVIDIA A10" and new["success_git_sha"] == "b56aa3f"
+
+
+def test_backfill_keeps_success_origin_already_on_a_row():
+    from scripts.backfill_speed_knobs import backfill
+
+    merged = {
+        **_row_with_compile_s("native", None),
+        "gpu": "NVIDIA L40S",
+        "git_sha": "new",
+        "success": 75.0,
+        "ci_low": 65.0,
+        "ci_high": 82.0,
+        "episodes": 100,
+        "success_gpu": "NVIDIA A10",
+        "success_git_sha": "old",
+    }
+    new = backfill(merged, {"denoise_steps": 10, "n_action_steps": 1})
+    assert new["success_gpu"] == "NVIDIA A10" and new["success_git_sha"] == "old"
+
+
+@pytest.mark.parametrize(
+    "episodes,origin,ok",
+    [
+        (100, {"success_gpu": "NVIDIA A10", "success_git_sha": "old"}, True),
+        (100, {"success_gpu": None, "success_git_sha": "old"}, False),
+        (100, {"success_gpu": "NVIDIA A10", "success_git_sha": None}, False),
+        (0, {"success_gpu": None, "success_git_sha": None}, True),
+        (0, {"success_gpu": "NVIDIA A10", "success_git_sha": None}, False),
+    ],
+)
+def test_validate_row_ties_success_origin_to_the_eval(episodes, origin, ok):
+    candidate = {**_row_with_compile_s("native", None), "episodes": episodes, **origin}
+    if ok:
+        row.validate_row(candidate)
+    else:
+        with pytest.raises(ValueError):
+            row.validate_row(candidate)
 
 
 def test_backfill_never_invents_compile_s_for_a_compiled_row():
@@ -417,7 +475,14 @@ def _write(results, technique="native", gpu="NVIDIA L40S", **overrides):
     return row.write_row(r, results)
 
 
-_EVALUATED = {"success": 97.0, "ci_low": 91.0, "ci_high": 99.0, "episodes": 100}
+_EVALUATED = {
+    "success": 97.0,
+    "ci_low": 91.0,
+    "ci_high": 99.0,
+    "episodes": 100,
+    "success_gpu": "NVIDIA A10",
+    "success_git_sha": "old",
+}
 
 
 def test_merge_keeps_old_success_and_new_speed_and_removes_the_old_row(tmp_path):

@@ -27,6 +27,8 @@ FIELDS = (
     "ci_low",
     "ci_high",
     "episodes",
+    "success_gpu",
+    "success_git_sha",
     "date",
     "lerobot_version",
     "git_sha",
@@ -79,6 +81,8 @@ def build_row(
         "ci_low": success["ci_low"] if success else None,
         "ci_high": success["ci_high"] if success else None,
         "episodes": success["episodes"] if success else 0,
+        "success_gpu": gpu if success else None,
+        "success_git_sha": git_sha if success else None,
         "date": date,
         "lerobot_version": lerobot_version,
         "git_sha": git_sha,
@@ -107,6 +111,13 @@ def validate_row(row: dict) -> dict:
             raise ValueError(f"compile_s must be positive, got {row['compile_s']!r}")
     elif row["compile_s"] is not None:
         raise ValueError(f"compile_s must be null when uncompiled, got {row['compile_s']!r}")
+    # gpu/git_sha describe the speed run; these say where the success numbers came from.
+    evaluated = row["episodes"] > 0
+    for field in ("success_gpu", "success_git_sha"):
+        if evaluated and not row[field]:
+            raise ValueError(f"{field} must be set on an evaluated row")
+        if not evaluated and row[field] is not None:
+            raise ValueError(f"{field} must be null without an eval, got {row[field]!r}")
     for field in ("model", "technique", "gpu", "date", "git_sha"):
         if not row[field]:
             raise ValueError(f"{field} must be a non-empty string")
