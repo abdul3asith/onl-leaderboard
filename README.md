@@ -1,3 +1,17 @@
+---
+title: onl-bench Leaderboard
+emoji: 🤖
+colorFrom: blue
+colorTo: gray
+sdk: gradio
+sdk_version: 6.31.0
+python_version: "3.12"
+app_file: board/app.py
+pinned: false
+license: apache-2.0
+short_description: Speed vs LIBERO success for VLA policies
+---
+
 # onl-bench
 
 Speed + LIBERO success benchmarks for VLA policies. One run → one JSON row in `results/`.
@@ -48,6 +62,7 @@ size, which `compile_s` does not cover.
 | `bench/_eval_entry.py` | wrapper that drives lerobot-eval precision per technique |
 | `bench/row.py` | build + validate + write the 21-field result row |
 | `modal_app.py` | Modal app + `modal run` entrypoint |
+| `board/app.py` | the leaderboard Space; reads `results/*.json` and `CLAUDE.md` |
 
 ## One GPU
 
@@ -88,3 +103,22 @@ uv sync
 uv run ruff check .
 uv run pytest        # GPU-free plumbing tests
 ```
+
+## Leaderboard
+
+```bash
+uv run python board/app.py   # http://127.0.0.1:7860
+```
+
+The front matter at the top of this file configures the Hugging Face Space. Publish or
+update it with this one command, which sends only the files the Space needs and drops rows
+no longer in `results/`:
+
+```bash
+hf upload basithcodes/onl-bench-leaderboard . . --repo-type space \
+  --include README.md --include requirements.txt --include CLAUDE.md \
+  --include board/app.py --include "results/*.json" --delete "results/*.json"
+```
+
+`sdk_version` above and the pin in `requirements.txt` must match the locked versions; a test
+checks this.
