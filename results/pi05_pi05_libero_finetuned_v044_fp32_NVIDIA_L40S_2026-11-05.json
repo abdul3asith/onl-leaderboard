@@ -16,8 +16,8 @@
   "ci_high": 100.0,
   "episodes": 100,
   "success_gpu": "NVIDIA L40S",
-  "success_git_sha": "474ef21",
+  "success_git_sha": "847c0d6",
   "date": "2026-11-05",
   "lerobot_version": "0.6.2",
-  "git_sha": "474ef21"
+  "git_sha": "847c0d6"
 }

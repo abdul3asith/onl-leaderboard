@@ -16,8 +16,8 @@
   "ci_high": 100.0,
   "episodes": 100,
   "success_gpu": "NVIDIA A10G",
-  "success_git_sha": "c7d9b3b",
+  "success_git_sha": "4f8784f",
   "date": "2026-11-05",
   "lerobot_version": "0.6.2",
-  "git_sha": "1cc46fe"
+  "git_sha": "f7a09e9"
 }
