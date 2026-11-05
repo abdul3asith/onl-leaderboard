@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from board import app
+from scripts import update_readme
 
 RULES = """# rules
 - Every number in results/ comes from a script run.
@@ -206,3 +207,25 @@ def test_space_pins_match_the_locked_versions():
     assert readme.startswith("---\n")
     assert f"sdk_version: {version('gradio')}\n" in readme
     assert f"plotly=={version('plotly')}" in Path("requirements.txt").read_text()
+
+
+def test_readme_results_are_current():
+    readme = Path("README.md").read_text()
+    assert update_readme.render(app.load_rows(), app.RULES_FILE.read_text()) in readme
+
+
+def test_readme_results_follow_the_rows():
+    rows = [
+        _row(technique="native", p50_ms=300.0, success=70.0),
+        _row(technique="compile_autotune", p50_ms=100.0, compile_s=50.0, success=71.0),
+        _row(technique="fp32", p50_ms=200.0, success=72.0),
+    ]
+    text = update_readme.render(rows, app.RULES_FILE.read_text())
+    assert "π0.5 70–72%" in text
+    assert "π0.5 300 → 100 ms (3.0× speed, 50 s one-time compile, success 70% → 71%)" in text
+    assert "no faster than native" not in text  # fp32 beat native here
+
+
+def test_readme_says_no_faster_only_when_it_is_true():
+    rows = [_row(technique="native", p50_ms=100.0), _row(technique="fp16", p50_ms=200.0)]
+    assert "no faster than native" in update_readme.render(rows, app.RULES_FILE.read_text())
