@@ -12,8 +12,8 @@ modal run modal_app.py::main --model smolvla --technique native --episodes-per-t
 # per-stage latency breakdown across techniques (speed only, no eval)
 modal run modal_app.py::breakdown_main --techniques native,fp32,fp16,compile,compile_autotune
 
-# a large model: pick the model and GPU; the row records the GPU that really ran
-modal run --detach modal_app.py::main --model pi05 --technique fp32 --gpu L40S
+# a long run that must outlive this terminal; the row is saved to the Volume
+modal run --detach modal_app.py::main --model pi05 --technique fp32
 ```
 
 Needs a Modal secret `huggingface` holding `HF_TOKEN`, from an account that has accepted
@@ -48,6 +48,17 @@ size, which `compile_s` does not cover.
 | `bench/_eval_entry.py` | wrapper that drives lerobot-eval precision per technique |
 | `bench/row.py` | build + validate + write the 19-field result row |
 | `modal_app.py` | Modal app + `modal run` entrypoint |
+
+## One GPU
+
+Speed is only comparable on one card, so every row is pinned to **L40S** and a run that
+lands on anything else stops before measuring. Modal's `A10` served both an `NVIDIA A10`
+and an `NVIDIA A10G` with no way to choose, about 27% apart on the same pi05 work.
+
+Success does not depend on the card. `scripts/merge_speed_rows.py` keeps the success
+fields of rows evaluated before the pin and takes everything else, including `gpu`, `date`
+and `git_sha`, from a speed-only L40S run. So `gpu` describes the speed numbers; where the
+success numbers ran is in the git history of the row.
 
 ## Precision & lerobot-eval
 

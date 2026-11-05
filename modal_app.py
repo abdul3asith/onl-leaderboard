@@ -15,7 +15,7 @@ from pathlib import Path
 
 import modal
 
-GPU = "A10G"
+GPU = "L40S"  # one type for every row; bench.row.require_pinned_gpu enforces it at runtime
 HERE = Path(__file__).parent
 
 # Image mirrors the old dpc-two eval image: lerobot from git with the smolvla and
@@ -96,7 +96,7 @@ def benchmark(
 
     from bench.models import get_model, speed_knobs
     from bench.policy import free_gpu, load_policy
-    from bench.row import build_row, write_row
+    from bench.row import build_row, require_pinned_gpu, write_row
     from bench.speed import run_speed
     from bench.success import run_success
     from bench.techniques import get_technique
@@ -104,7 +104,7 @@ def benchmark(
     spec = get_model(model)
     tech = get_technique(technique)
     device = "cuda"
-    gpu_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else GPU
+    gpu_name = require_pinned_gpu(torch.cuda.get_device_name(0))
 
     bundle = load_policy(spec, device, tech)
     speed = run_speed(bundle, tech, device)
@@ -168,12 +168,13 @@ def breakdown(model: str, techniques: str, iters: int, warmup: int) -> str:
     from bench.breakdown import breakdown as run_breakdown
     from bench.models import get_model
     from bench.policy import free_gpu, load_policy
+    from bench.row import require_pinned_gpu
     from bench.techniques import get_technique
 
     spec = get_model(model)
     device = "cuda"
 
-    gpu_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else GPU
+    gpu_name = require_pinned_gpu(torch.cuda.get_device_name(0))
     source = json.loads(distribution("lerobot").read_text("direct_url.json"))
     results = {"gpu": gpu_name, "lerobot_commit": source["vcs_info"]["commit_id"], "runs": []}
     for name in techniques.split(","):
@@ -198,10 +199,8 @@ def breakdown_main(
     techniques: str = "native,fp32,fp16,compile",
     iters: int = 50,
     warmup: int = 10,
-    gpu: str = GPU,
 ):
-    fn = breakdown.with_options(gpu=gpu)
-    data = json.loads(fn.remote(model, techniques, iters, warmup))
+    data = json.loads(breakdown.remote(model, techniques, iters, warmup))
     print(f"GPU: {data['gpu']}  |  lerobot commit: {data['lerobot_commit']}\n")
     for run in data["runs"]:
         if "error" in run:
@@ -234,7 +233,6 @@ def main(
     episodes_per_task: int = 10,  # x10 LIBERO-Object tasks = 100 episodes
     seed: int = 1000,
     batch_size: int = 10,
-    gpu: str = GPU,  # the row records the GPU that actually ran, read from torch
 ):
     from bench.row import write_row
 
@@ -246,8 +244,7 @@ def main(
     )
     git_sha = sha.stdout.strip() or "unknown"
 
-    fn = benchmark.with_options(gpu=gpu)
-    row_json = fn.remote(model, technique, episodes_per_task, seed, batch_size, git_sha)
+    row_json = benchmark.remote(model, technique, episodes_per_task, seed, batch_size, git_sha)
     row = json.loads(row_json)
     path = write_row(row, HERE / "results")
     print(json.dumps(row, indent=2))

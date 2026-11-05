@@ -389,3 +389,81 @@ def test_profiler_first_call_is_timed_and_counts_as_warmup():
     stats = profiler.profile(step, "cpu", steps=2, warmup=10)
     assert calls["n"] == 12  # still 10 warmup, not 11
     assert stats["first_call_ms"] >= 0
+
+
+def test_require_pinned_gpu():
+    assert row.require_pinned_gpu(row.PINNED_GPU) == row.PINNED_GPU
+    for other in ("NVIDIA A10", "NVIDIA A10G"):
+        with pytest.raises(RuntimeError):
+            row.require_pinned_gpu(other)
+
+
+def _write(results, technique="native", gpu="NVIDIA L40S", **overrides):
+    r = row.build_row(
+        model="pi05",
+        checkpoint="c",
+        gpu=gpu,
+        technique=technique,
+        denoise_steps=10,
+        n_action_steps=10,
+        compile_s=12.5 if technique.startswith("compile") else None,
+        speed=_speed(),
+        success=None,
+        date="2026-11-05",
+        lerobot_version="0.6.2",
+        git_sha="new",
+    )
+    r.update(overrides)
+    return row.write_row(r, results)
+
+
+_EVALUATED = {"success": 97.0, "ci_low": 91.0, "ci_high": 99.0, "episodes": 100}
+
+
+def test_merge_keeps_old_success_and_new_speed_and_removes_the_old_row(tmp_path):
+    import json
+
+    from scripts.merge_speed_rows import merge_all
+
+    old = _write(tmp_path, gpu="NVIDIA A10", p50_ms=999.0, git_sha="old", **_EVALUATED)
+    new = _write(tmp_path)
+    merge_all(tmp_path)
+
+    assert not old.exists()
+    merged = json.loads(new.read_text())
+    assert merged["gpu"] == "NVIDIA L40S" and merged["git_sha"] == "new"
+    assert merged["p50_ms"] == 1.0
+    assert {k: merged[k] for k in _EVALUATED} == _EVALUATED
+    assert sorted(p.name for p in tmp_path.iterdir()) == [new.name]
+
+
+@pytest.mark.parametrize(
+    "mismatch",
+    [{"n_action_steps": 50}, {"denoise_steps": 5}, {"lerobot_version": "0.7.0"}],
+)
+def test_merge_refuses_rows_that_ran_different_settings(tmp_path, mismatch):
+    from scripts.merge_speed_rows import merge_all
+
+    old = _write(tmp_path, gpu="NVIDIA A10", **_EVALUATED, **mismatch)
+    new = _write(tmp_path)
+    with pytest.raises(ValueError):
+        merge_all(tmp_path)
+    assert old.exists() and new.exists()
+
+
+def test_merge_refuses_a_speed_row_without_an_evaluated_partner(tmp_path):
+    from scripts.merge_speed_rows import merge_all
+
+    _write(tmp_path, gpu="NVIDIA A10", technique="fp32", **_EVALUATED)
+    _write(tmp_path)
+    with pytest.raises(ValueError):
+        merge_all(tmp_path)
+
+
+def test_merge_refuses_a_speed_row_off_the_pinned_gpu(tmp_path):
+    from scripts.merge_speed_rows import merge_all
+
+    _write(tmp_path, gpu="NVIDIA A10", p50_ms=999.0, **_EVALUATED)
+    _write(tmp_path, gpu="NVIDIA A10G")
+    with pytest.raises(RuntimeError):
+        merge_all(tmp_path)

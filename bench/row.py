@@ -34,6 +34,17 @@ FIELDS = (
 
 _SPEED_FIELDS = ("p50_ms", "p99_ms", "jitter_ms", "hz", "peak_mb")
 
+# Speed is only comparable on one card. Modal's "A10" served both an A10 and an A10G,
+# about 27% apart on the same pi05 work, so rows are pinned to one type and checked.
+PINNED_GPU = "NVIDIA L40S"
+
+
+def require_pinned_gpu(name: str) -> str:
+    """Return the GPU name, or stop the run before it measures on the wrong card."""
+    if name != PINNED_GPU:
+        raise RuntimeError(f"landed on {name!r}, rows are pinned to {PINNED_GPU!r}")
+    return name
+
 
 def build_row(
     *,
