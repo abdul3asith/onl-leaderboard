@@ -8,6 +8,7 @@ code here, only a `ModelSpec` entry.
 
 from __future__ import annotations
 
+import gc
 import importlib
 
 import torch
@@ -28,7 +29,15 @@ def load_policy(spec: ModelSpec, device: str, technique: Technique | None = None
     module = importlib.import_module(spec.policy_module)
     policy_cls = getattr(module, spec.policy_class)
 
-    policy = policy_cls.from_pretrained(spec.policy_path)
+    kwargs = {}
+    if spec.compile_model is not None:  # read at build time, so it has to go in the config
+        from lerobot.configs.policies import PreTrainedConfig
+
+        config = PreTrainedConfig.from_pretrained(spec.policy_path)
+        config.compile_model = spec.compile_model
+        kwargs["config"] = config
+
+    policy = policy_cls.from_pretrained(spec.policy_path, **kwargs)
     if spec.n_action_steps is not None:
         policy.config.n_action_steps = spec.n_action_steps
         policy.reset()  # the action queue's maxlen comes from n_action_steps
@@ -38,6 +47,18 @@ def load_policy(spec: ModelSpec, device: str, technique: Technique | None = None
     policy.eval()
     pre, post = make_pre_post_processors(policy.config, pretrained_path=spec.policy_path)
     return {"policy": policy, "pre": pre, "post": post, "spec": spec}
+
+
+def free_gpu() -> float:
+    """Release a dropped policy's GPU memory; returns the MB still allocated.
+
+    torch.compile's global caches keep a compiled model's weights alive, so dropping
+    the last reference is not enough.
+    """
+    torch._dynamo.reset()
+    gc.collect()
+    torch.cuda.empty_cache()
+    return torch.cuda.memory_allocated() / 1e6
 
 
 def make_observation(bundle: dict, device: str) -> dict:

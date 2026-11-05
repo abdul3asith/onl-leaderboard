@@ -61,6 +61,8 @@ def build_argv(args: argparse.Namespace, technique: Technique) -> list[str]:
     ]
     if args.n_action_steps is not None:
         argv.append(f"--policy.n_action_steps={args.n_action_steps}")
+    if args.compile_model is not None:
+        argv.append(f"--policy.compile_model={args.compile_model}")
     return argv
 
 
@@ -75,6 +77,7 @@ def main() -> None:
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--output-dir", required=True)
     ap.add_argument("--n-action-steps", type=int, default=None)
+    ap.add_argument("--compile-model", choices=["true", "false"], default=None)
     args = ap.parse_args()
 
     technique = get_technique(args.technique)

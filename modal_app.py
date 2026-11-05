@@ -85,7 +85,6 @@ def benchmark(
 ) -> str:
     """Profile speed, run the LIBERO success eval, return the assembled row as JSON."""
     import datetime as dt
-    import gc
     import os
     import sys
     from importlib.metadata import version
@@ -96,7 +95,7 @@ def benchmark(
     import torch
 
     from bench.models import get_model, speed_knobs
-    from bench.policy import load_policy
+    from bench.policy import free_gpu, load_policy
     from bench.row import build_row, write_row
     from bench.speed import run_speed
     from bench.success import run_success
@@ -114,8 +113,7 @@ def benchmark(
     # The eval is a subprocess with its own copy of the policy: free this one first, or
     # a large model holds the GPU twice and an OOM says nothing about the model itself.
     del bundle
-    gc.collect()
-    torch.cuda.empty_cache()
+    print(f"GPU memory still allocated before eval: {free_gpu():.0f} MB")
 
     success = None
     if episodes_per_task > 0:
@@ -155,8 +153,9 @@ def benchmark(
     volumes={"/root/.cache/huggingface": hf_cache},
     secrets=[hf_secret],
 )
-def breakdown(model: str, techniques: str, iters: int, warmup: int) -> str:
+def breakdown(model: str, techniques: str, iters: int, warmup: int, compile_model: str) -> str:
     """Per-stage (reset/pre/model/post) latency + device report for each technique."""
+    import dataclasses
     import os
     import sys
     from importlib.metadata import distribution
@@ -168,10 +167,12 @@ def breakdown(model: str, techniques: str, iters: int, warmup: int) -> str:
 
     from bench.breakdown import breakdown as run_breakdown
     from bench.models import get_model
-    from bench.policy import load_policy
+    from bench.policy import free_gpu, load_policy
     from bench.techniques import get_technique
 
     spec = get_model(model)
+    if compile_model != "stored":
+        spec = dataclasses.replace(spec, compile_model=compile_model == "on")
     device = "cuda"
 
     gpu_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else GPU
@@ -179,6 +180,7 @@ def breakdown(model: str, techniques: str, iters: int, warmup: int) -> str:
     results = {"gpu": gpu_name, "lerobot_commit": source["vcs_info"]["commit_id"], "runs": []}
     for name in techniques.split(","):
         tech = get_technique(name.strip())
+        bundle = None
         try:
             # Load fresh per technique so each cast starts from the native weights.
             bundle = load_policy(spec, device, tech)
@@ -186,6 +188,8 @@ def breakdown(model: str, techniques: str, iters: int, warmup: int) -> str:
         except Exception as exc:  # one bad technique shouldn't lose the others
             err = f"{type(exc).__name__}: {exc}"
             results["runs"].append({"technique": tech.name, "error": err})
+        del bundle
+        results["runs"][-1]["gpu_mb_after_free"] = free_gpu()
     hf_cache.commit()
     return json.dumps(results)
 
@@ -197,9 +201,10 @@ def breakdown_main(
     iters: int = 50,
     warmup: int = 10,
     gpu: str = GPU,
+    compile_model: str = "stored",  # stored | on | off
 ):
     fn = breakdown.with_options(gpu=gpu)
-    data = json.loads(fn.remote(model, techniques, iters, warmup))
+    data = json.loads(fn.remote(model, techniques, iters, warmup, compile_model))
     print(f"GPU: {data['gpu']}  |  lerobot commit: {data['lerobot_commit']}\n")
     for run in data["runs"]:
         if "error" in run:
@@ -221,6 +226,7 @@ def breakdown_main(
         print(f"  amortized per control step: {run['amortized_per_action_ms']:.2f} ms")
         cpu = run["cpu_tensors_in_batch"]
         print(f"  CPU tensors fed to model: {[c['key'] for c in cpu] or 'none'}")
+        print(f"  GPU MB still allocated after free: {run['gpu_mb_after_free']:.0f}")
         print()
 
 

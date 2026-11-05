@@ -157,6 +157,7 @@ def _args(technique):
         device="cuda",
         output_dir="/tmp/eval/libero_object",
         n_action_steps=None,
+        compile_model=None,
     )
 
 
@@ -220,6 +221,14 @@ def test_build_argv_passes_n_action_steps_only_when_set():
     assert not any("n_action_steps" in a for a in build_argv(args, t))
     args.n_action_steps = 10
     assert "--policy.n_action_steps=10" in build_argv(args, t)
+
+
+def test_build_argv_passes_compile_model_only_when_set():
+    t = get_technique("native")
+    args = _args("native")
+    assert not any("compile_model" in a for a in build_argv(args, t))
+    args.compile_model = "false"
+    assert "--policy.compile_model=false" in build_argv(args, t)
 
 
 def _mixed_policy(precision):
