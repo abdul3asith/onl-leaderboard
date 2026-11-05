@@ -4,16 +4,16 @@ Speed + LIBERO success benchmarks for VLA policies. One run → one JSON row in 
 
 ```bash
 # full row (speed + 100-episode LIBERO-Object success eval, ~$1 of GPU)
-modal run modal_app.py --model smolvla --technique native
+modal run modal_app.py::main --model smolvla --technique native
 
 # cheap speed-only smoke (skips the paid eval)
-modal run modal_app.py --model smolvla --technique native --episodes-per-task 0
+modal run modal_app.py::main --model smolvla --technique native --episodes-per-task 0
 
 # per-stage latency breakdown across techniques (speed only, no eval)
 modal run modal_app.py::breakdown_main --techniques native,fp32,fp16,compile,compile_autotune
 
 # a large model: pick the model and GPU; the row records the GPU that really ran
-modal run --detach modal_app.py --model pi05 --technique fp32 --gpu L40S
+modal run --detach modal_app.py::main --model pi05 --technique fp32 --gpu L40S
 ```
 
 Needs a Modal secret `huggingface` holding `HF_TOKEN`, from an account that has accepted

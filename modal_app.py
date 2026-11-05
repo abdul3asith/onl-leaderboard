@@ -1,6 +1,6 @@
 """Modal entrypoint for onl-bench.
 
-    modal run modal_app.py --model smolvla --technique fp32
+    modal run modal_app.py::main --model smolvla --technique fp32
 
 runs the speed benchmark and the LIBERO success eval on a GPU and writes one
 JSON row to results/. Use --episodes-per-task 0 to skip the (paid) success eval
