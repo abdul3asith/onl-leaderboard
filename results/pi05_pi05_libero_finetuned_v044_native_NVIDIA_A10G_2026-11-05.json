@@ -1,0 +1,21 @@
+{
+  "model": "pi05",
+  "checkpoint": "pi05_libero_finetuned_v044",
+  "gpu": "NVIDIA A10G",
+  "technique": "native",
+  "denoise_steps": 10,
+  "n_action_steps": 10,
+  "compile_s": null,
+  "p50_ms": 393.0577087402344,
+  "p99_ms": 399.1571405029297,
+  "jitter_ms": 2.216377125878466,
+  "hz": 2.5052789954853893,
+  "peak_mb": 10238.205952,
+  "success": 100.0,
+  "ci_low": 96.30065017930143,
+  "ci_high": 100.0,
+  "episodes": 100,
+  "date": "2026-11-05",
+  "lerobot_version": "0.6.2",
+  "git_sha": "c7d9b3b"
+}
