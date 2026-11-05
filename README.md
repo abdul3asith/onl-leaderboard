@@ -10,7 +10,7 @@ modal run modal_app.py --model smolvla --technique native
 modal run modal_app.py --model smolvla --technique native --episodes-per-task 0
 
 # per-stage latency breakdown across techniques (speed only, no eval)
-modal run modal_app.py::breakdown_main --techniques native,fp32,fp16
+modal run modal_app.py::breakdown_main --techniques native,fp32,fp16,compile
 
 # a large model: pick the model and GPU; the row records the GPU that really ran
 modal run --detach modal_app.py --model pi05 --technique fp32 --gpu L40S
@@ -22,7 +22,13 @@ the license of [google/paligemma-3b-pt-224](https://huggingface.co/google/palige
 
 Techniques are **weight dtypes**: `native` (as the checkpoint ships — bf16 for
 the SmolVLA LIBERO checkpoint), `fp32`, `fp16`. Each casts the policy with
-`policy.to(dtype)` so the labelled precision is the precision that runs.
+`policy.to(dtype)` so the labelled precision is the precision that runs. `compile` is
+`native` plus `torch.compile` (`compile_model=true`, mode `max-autotune`).
+
+**A row is either fully compiled or fully uncompiled.** The technique sets
+`compile_model` in both the speed path and the eval, overriding the checkpoint: pi05
+stores `true`, yet its `native`, `fp32` and `fp16` rows run uncompiled. A policy that
+does not match its label stops the run.
 
 ## Layout
 

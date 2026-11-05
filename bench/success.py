@@ -60,8 +60,6 @@ def run_success(
     ]
     if spec.n_action_steps is not None:
         cmd += ["--n-action-steps", str(spec.n_action_steps)]
-    if spec.compile_model is not None:
-        cmd += ["--compile-model", "true" if spec.compile_model else "false"]
     subprocess.run(cmd, check=True, input="N\n", text=True)
 
     info = json.loads((output_dir / "eval_info.json").read_text())

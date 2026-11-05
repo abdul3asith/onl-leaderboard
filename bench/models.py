@@ -22,7 +22,6 @@ class ModelSpec:
     checkpoint: str = "main"  # recorded in the row
     denoise_attr: str = "num_steps"  # policy-config attribute holding the denoise step count
     n_action_steps: int | None = None  # overrides the checkpoint's value; None = as stored
-    compile_model: bool | None = None  # overrides the checkpoint's value; None = as stored
 
 
 MODELS: dict[str, ModelSpec] = {

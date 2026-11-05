@@ -5,7 +5,8 @@ no-op for SmolVLA), and its autocast is always the device-default dtype. So this
 wrapper reproduces, in the eval, the same two levers the speed path uses:
 
 - weight cast (fp32): patch the eval module's `make_policy` to `policy.to(dtype)`
-  right after the policy is built, asserting the cast took.
+  right after the policy is built, asserting the cast took. The same patch checks
+  every technique's compile state.
 - autocast (fp16): set the global autocast dtype and run the official loop with
   `--policy.use_amp=true` (its autocast reads the global default at construction).
 
@@ -21,21 +22,23 @@ import sys
 
 import torch
 
-from .techniques import Technique, cast_weights, get_technique
+from .techniques import COMPILE_MODE, Technique, cast_weights, check_compile, get_technique
 
 
-def _install_weight_cast(dtype: torch.dtype) -> None:
+def _install_policy_hook(technique: Technique) -> None:
     import lerobot.scripts.lerobot_eval as evalmod
 
     original_make_policy = evalmod.make_policy
 
-    def make_policy_cast(*args, **kwargs):
+    def make_policy_for_technique(*args, **kwargs):
         policy = original_make_policy(*args, **kwargs)
-        cast_weights(policy, dtype)
-        policy.eval()
+        check_compile(policy, technique)
+        if technique.cast_dtype is not None:
+            cast_weights(policy, technique.cast_dtype)
+            policy.eval()
         return policy
 
-    evalmod.make_policy = make_policy_cast
+    evalmod.make_policy = make_policy_for_technique
 
 
 def _apply_autocast_dtype(device: str, dtype: torch.dtype) -> None:
@@ -52,6 +55,8 @@ def build_argv(args: argparse.Namespace, technique: Technique) -> list[str]:
         f"--policy.path={args.policy_path}",
         f"--policy.device={args.device}",
         f"--policy.use_amp={'true' if use_amp else 'false'}",
+        f"--policy.compile_model={'true' if technique.compile_model else 'false'}",
+        f"--policy.compile_mode={COMPILE_MODE}",
         "--env.type=libero",
         f"--env.task={args.suite}",
         f"--eval.n_episodes={args.episodes_per_task}",
@@ -61,8 +66,6 @@ def build_argv(args: argparse.Namespace, technique: Technique) -> list[str]:
     ]
     if args.n_action_steps is not None:
         argv.append(f"--policy.n_action_steps={args.n_action_steps}")
-    if args.compile_model is not None:
-        argv.append(f"--policy.compile_model={args.compile_model}")
     return argv
 
 
@@ -77,12 +80,10 @@ def main() -> None:
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--output-dir", required=True)
     ap.add_argument("--n-action-steps", type=int, default=None)
-    ap.add_argument("--compile-model", choices=["true", "false"], default=None)
     args = ap.parse_args()
 
     technique = get_technique(args.technique)
-    if technique.cast_dtype is not None:
-        _install_weight_cast(technique.cast_dtype)
+    _install_policy_hook(technique)
     if technique.autocast_dtype is not None:
         _apply_autocast_dtype(args.device, technique.autocast_dtype)
 

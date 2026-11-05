@@ -14,35 +14,32 @@ import importlib
 import torch
 
 from .models import ModelSpec
-from .techniques import Technique, cast_weights
+from .techniques import COMPILE_MODE, Technique, cast_weights, check_compile
 
 
-def load_policy(spec: ModelSpec, device: str, technique: Technique | None = None) -> dict:
-    """Load the policy plus its pre/post-processors, cast to the technique's dtype.
+def load_policy(spec: ModelSpec, device: str, technique: Technique) -> dict:
+    """Load the policy plus its pre/post-processors, built as the technique says.
 
-    `technique=None` or a `native` technique leaves the weights exactly as the
-    checkpoint ships. Load fresh per technique rather than re-casting one bundle,
-    so e.g. fp16 is cast from the native weights, not from an already-fp32 copy.
+    A `native` technique leaves the weights exactly as the checkpoint ships. Load
+    fresh per technique rather than re-casting one bundle, so e.g. fp16 is cast from
+    the native weights, not from an already-fp32 copy.
     """
+    from lerobot.configs.policies import PreTrainedConfig
     from lerobot.policies.factory import make_pre_post_processors
 
     module = importlib.import_module(spec.policy_module)
     policy_cls = getattr(module, spec.policy_class)
 
-    kwargs = {}
-    if spec.compile_model is not None:  # read at build time, so it has to go in the config
-        from lerobot.configs.policies import PreTrainedConfig
-
-        config = PreTrainedConfig.from_pretrained(spec.policy_path)
-        config.compile_model = spec.compile_model
-        kwargs["config"] = config
-
-    policy = policy_cls.from_pretrained(spec.policy_path, **kwargs)
+    config = PreTrainedConfig.from_pretrained(spec.policy_path)
+    config.compile_model = technique.compile_model
+    config.compile_mode = COMPILE_MODE
     if spec.n_action_steps is not None:
-        policy.config.n_action_steps = spec.n_action_steps
-        policy.reset()  # the action queue's maxlen comes from n_action_steps
+        config.n_action_steps = spec.n_action_steps
+
+    policy = policy_cls.from_pretrained(spec.policy_path, config=config)
+    check_compile(policy, technique)
     policy.to(device)
-    if technique is not None and technique.cast_dtype is not None:
+    if technique.cast_dtype is not None:
         cast_weights(policy, technique.cast_dtype)
     policy.eval()
     pre, post = make_pre_post_processors(policy.config, pretrained_path=spec.policy_path)

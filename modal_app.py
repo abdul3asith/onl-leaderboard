@@ -153,9 +153,8 @@ def benchmark(
     volumes={"/root/.cache/huggingface": hf_cache},
     secrets=[hf_secret],
 )
-def breakdown(model: str, techniques: str, iters: int, warmup: int, compile_model: str) -> str:
+def breakdown(model: str, techniques: str, iters: int, warmup: int) -> str:
     """Per-stage (reset/pre/model/post) latency + device report for each technique."""
-    import dataclasses
     import os
     import sys
     from importlib.metadata import distribution
@@ -171,8 +170,6 @@ def breakdown(model: str, techniques: str, iters: int, warmup: int, compile_mode
     from bench.techniques import get_technique
 
     spec = get_model(model)
-    if compile_model != "stored":
-        spec = dataclasses.replace(spec, compile_model=compile_model == "on")
     device = "cuda"
 
     gpu_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else GPU
@@ -197,14 +194,13 @@ def breakdown(model: str, techniques: str, iters: int, warmup: int, compile_mode
 @app.local_entrypoint()
 def breakdown_main(
     model: str = "smolvla",
-    techniques: str = "native,fp32,fp16",
+    techniques: str = "native,fp32,fp16,compile",
     iters: int = 50,
     warmup: int = 10,
     gpu: str = GPU,
-    compile_model: str = "stored",  # stored | on | off
 ):
     fn = breakdown.with_options(gpu=gpu)
-    data = json.loads(fn.remote(model, techniques, iters, warmup, compile_model))
+    data = json.loads(fn.remote(model, techniques, iters, warmup))
     print(f"GPU: {data['gpu']}  |  lerobot commit: {data['lerobot_commit']}\n")
     for run in data["runs"]:
         if "error" in run:
@@ -233,7 +229,7 @@ def breakdown_main(
 @app.local_entrypoint()
 def main(
     model: str = "smolvla",
-    technique: str = "native",  # as the checkpoint ships; fp32/fp16 are extra rows
+    technique: str = "native",  # as the checkpoint ships; fp32/fp16/compile are extra rows
     episodes_per_task: int = 10,  # x10 LIBERO-Object tasks = 100 episodes
     seed: int = 1000,
     batch_size: int = 10,

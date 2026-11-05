@@ -11,6 +11,13 @@ techniques use the lever that actually works for each precision:
   already float32, so this runs cleanly as true full precision.
 - ``fp16``   — ``torch.autocast(float16)`` over the native weights: the standard
   mixed-precision inference path, since weight-casting to fp16 is unsupported.
+- ``compile`` — ``native`` plus lerobot's ``compile_model`` switch, which wraps
+  ``sample_actions`` in ``torch.compile`` when the policy is built.
+
+Only ``compile`` compiles. Every other technique forces ``compile_model`` off, even
+though pi05's checkpoint stores it on, so one row never mixes compiled and uncompiled
+numbers: the flag comes from the technique in both the speed path and the eval, and
+``check_compile`` stops a run whose policy does not match its label.
 
 The same ``cast_dtype`` + ``autocast_dtype`` drive both the speed benchmark and
 the success eval, so the two numbers in a row describe the same arithmetic.
@@ -32,12 +39,16 @@ class Technique:
     name: str
     cast_dtype: torch.dtype | None  # weight cast via policy.to(...); None = as shipped
     autocast_dtype: torch.dtype | None  # compute via torch.autocast(...); None = no autocast
+    compile_model: bool = False  # torch.compile sample_actions at build time
 
+
+COMPILE_MODE = "max-autotune"  # lerobot's default for both models
 
 TECHNIQUES: dict[str, Technique] = {
     "native": Technique("native", None, None),
     "fp32": Technique("fp32", torch.float32, None),
     "fp16": Technique("fp16", None, torch.float16),
+    "compile": Technique("compile", None, None, compile_model=True),
 }
 
 
@@ -56,10 +67,18 @@ def cast_weights(policy, dtype: torch.dtype) -> None:
         raise RuntimeError(f"weight cast failed: wanted {dtype}, got {got}")
 
 
+def check_compile(policy, technique: Technique) -> None:
+    """Raise unless the built policy is compiled exactly when its technique says so."""
+    compiled = hasattr(policy.model.sample_actions, "_torchdynamo_orig_callable")
+    if compiled != technique.compile_model:
+        raise RuntimeError(
+            f"{technique.name}: wanted compile={technique.compile_model}, "
+            f"policy has compile={compiled}"
+        )
+
+
 def get_technique(name: str) -> Technique:
     try:
         return TECHNIQUES[name]
     except KeyError:
-        raise KeyError(
-            f"unknown technique {name!r}; registered: {sorted(TECHNIQUES)}"
-        ) from None
+        raise KeyError(f"unknown technique {name!r}; registered: {sorted(TECHNIQUES)}") from None

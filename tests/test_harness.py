@@ -14,7 +14,13 @@ import torch
 from bench import profiler, row
 from bench._eval_entry import build_argv
 from bench.models import get_model, speed_knobs
-from bench.techniques import cast_weights, get_technique
+from bench.techniques import (
+    COMPILE_MODE,
+    TECHNIQUES,
+    cast_weights,
+    check_compile,
+    get_technique,
+)
 
 
 def test_profiler_cpu_shape():
@@ -157,7 +163,6 @@ def _args(technique):
         device="cuda",
         output_dir="/tmp/eval/libero_object",
         n_action_steps=None,
-        compile_model=None,
     )
 
 
@@ -223,12 +228,38 @@ def test_build_argv_passes_n_action_steps_only_when_set():
     assert "--policy.n_action_steps=10" in build_argv(args, t)
 
 
-def test_build_argv_passes_compile_model_only_when_set():
-    t = get_technique("native")
-    args = _args("native")
-    assert not any("compile_model" in a for a in build_argv(args, t))
-    args.compile_model = "false"
-    assert "--policy.compile_model=false" in build_argv(args, t)
+@pytest.mark.parametrize(
+    "tech,compiled",
+    [("native", False), ("fp32", False), ("fp16", False), ("compile", True)],
+)
+def test_build_argv_compile_flag_is_always_explicit(tech, compiled):
+    # Always passed, so a checkpoint's stored compile_model can never leak into a row.
+    argv = build_argv(_args(tech), get_technique(tech))
+    assert f"--policy.compile_model={'true' if compiled else 'false'}" in argv
+    assert "--policy.compile_mode=max-autotune" in argv
+
+
+def test_only_the_compile_technique_compiles():
+    compiled = {name for name, t in TECHNIQUES.items() if t.compile_model}
+    assert compiled == {"compile"}
+    compile_tech = get_technique("compile")
+    assert compile_tech.cast_dtype is None and compile_tech.autocast_dtype is None
+
+
+def test_check_compile_stops_a_mismatched_policy():
+    class Net(torch.nn.Module):
+        def sample_actions(self, x):
+            return x
+
+    policy = types.SimpleNamespace(model=Net())
+    check_compile(policy, get_technique("native"))
+    with pytest.raises(RuntimeError):
+        check_compile(policy, get_technique("compile"))
+
+    policy.model.sample_actions = torch.compile(policy.model.sample_actions, mode=COMPILE_MODE)
+    check_compile(policy, get_technique("compile"))
+    with pytest.raises(RuntimeError):
+        check_compile(policy, get_technique("native"))
 
 
 def _mixed_policy(precision):
