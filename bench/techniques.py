@@ -14,6 +14,10 @@ techniques use the lever that actually works for each precision:
 
 The same ``cast_dtype`` + ``autocast_dtype`` drive both the speed benchmark and
 the success eval, so the two numbers in a row describe the same arithmetic.
+
+pi05 ships mixed: bf16 language/expert, float32 vision path and norms. In eval mode
+it runs its vision tower in a nested bf16 autocast, which survives the outer fp16
+autocast, so pi05's ``fp16`` row is fp16 outside the vision tower and bf16 inside.
 """
 
 from __future__ import annotations
@@ -35,6 +39,21 @@ TECHNIQUES: dict[str, Technique] = {
     "fp32": Technique("fp32", torch.float32, None),
     "fp16": Technique("fp16", None, torch.float16),
 }
+
+
+def cast_weights(policy, dtype: torch.dtype) -> None:
+    """`policy.to(dtype)`, asserting every floating-point weight took the cast.
+
+    pi05 caches its build-time precision and picks the vision tower's autocast from
+    it, so `.to()` alone would leave vision running bf16 under an fp32 label.
+    """
+    policy.to(dtype)
+    expert = getattr(getattr(policy, "model", None), "paligemma_with_expert", None)
+    if expert is not None:
+        expert.precision = dtype
+    got = {p.dtype for p in policy.parameters() if p.is_floating_point()}
+    if got != {dtype}:
+        raise RuntimeError(f"weight cast failed: wanted {dtype}, got {got}")
 
 
 def get_technique(name: str) -> Technique:

@@ -58,6 +58,8 @@ def run_success(
         "--output-dir",
         str(output_dir),
     ]
+    if spec.n_action_steps is not None:
+        cmd += ["--n-action-steps", str(spec.n_action_steps)]
     subprocess.run(cmd, check=True, input="N\n", text=True)
 
     info = json.loads((output_dir / "eval_info.json").read_text())

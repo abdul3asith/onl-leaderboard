@@ -46,6 +46,9 @@ image = (
     )
     .pip_install("pip", "setuptools", "wheel")
     .pip_install("lerobot[smolvla,libero] @ git+https://github.com/huggingface/lerobot.git")
+    # Everything lerobot[pi] adds on top. A separate layer, so the cached lerobot layer
+    # above is kept and pi05 runs the same lerobot commit as the SmolVLA rows.
+    .pip_install("sentencepiece>=0.2.0,<0.3.0")
     .add_local_dir(
         HERE,
         remote_path="/root/app",
@@ -62,12 +65,15 @@ hf_cache = modal.Volume.from_name("hf-cache", create_if_missing=True)
 # lost if that process is killed mid-run).
 results_vol = modal.Volume.from_name("onl-bench-results", create_if_missing=True)
 RESULTS_VOL_DIR = "/results"
+# pi05's PaliGemma tokenizer is a gated Hub repo.
+hf_secret = modal.Secret.from_name("huggingface", required_keys=["HF_TOKEN"])
 
 
 @app.function(
     gpu=GPU,
     timeout=7200,  # 2h: a 100-episode eval is ~35 min; leave generous headroom
     volumes={"/root/.cache/huggingface": hf_cache, RESULTS_VOL_DIR: results_vol},
+    secrets=[hf_secret],
 )
 def benchmark(
     model: str,
@@ -79,6 +85,7 @@ def benchmark(
 ) -> str:
     """Profile speed, run the LIBERO success eval, return the assembled row as JSON."""
     import datetime as dt
+    import gc
     import os
     import sys
     from importlib.metadata import version
@@ -88,7 +95,7 @@ def benchmark(
 
     import torch
 
-    from bench.models import get_model
+    from bench.models import get_model, speed_knobs
     from bench.policy import load_policy
     from bench.row import build_row, write_row
     from bench.speed import run_speed
@@ -102,6 +109,13 @@ def benchmark(
 
     bundle = load_policy(spec, device, tech)
     speed = run_speed(bundle, tech, device)
+    knobs = speed_knobs(spec, bundle["policy"].config)
+
+    # The eval is a subprocess with its own copy of the policy: free this one first, or
+    # a large model holds the GPU twice and an OOM says nothing about the model itself.
+    del bundle
+    gc.collect()
+    torch.cuda.empty_cache()
 
     success = None
     if episodes_per_task > 0:
@@ -121,6 +135,7 @@ def benchmark(
         checkpoint=spec.checkpoint,
         gpu=gpu_name,
         technique=tech.name,
+        **knobs,
         speed=speed,
         success=success,
         date=dt.datetime.now(dt.UTC).strftime("%Y-%m-%d"),
@@ -134,11 +149,17 @@ def benchmark(
     return json.dumps(row)
 
 
-@app.function(gpu=GPU, timeout=1800, volumes={"/root/.cache/huggingface": hf_cache})
+@app.function(
+    gpu=GPU,
+    timeout=3600,
+    volumes={"/root/.cache/huggingface": hf_cache},
+    secrets=[hf_secret],
+)
 def breakdown(model: str, techniques: str, iters: int, warmup: int) -> str:
     """Per-stage (reset/pre/model/post) latency + device report for each technique."""
     import os
     import sys
+    from importlib.metadata import distribution
 
     os.chdir("/root/app")
     sys.path.insert(0, "/root/app")
@@ -154,7 +175,8 @@ def breakdown(model: str, techniques: str, iters: int, warmup: int) -> str:
     device = "cuda"
 
     gpu_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else GPU
-    results = {"gpu": gpu_name, "runs": []}
+    source = json.loads(distribution("lerobot").read_text("direct_url.json"))
+    results = {"gpu": gpu_name, "lerobot_commit": source["vcs_info"]["commit_id"], "runs": []}
     for name in techniques.split(","):
         tech = get_technique(name.strip())
         try:
@@ -174,18 +196,24 @@ def breakdown_main(
     techniques: str = "native,fp32,fp16",
     iters: int = 50,
     warmup: int = 10,
+    gpu: str = GPU,
 ):
-    data = json.loads(breakdown.remote(model, techniques, iters, warmup))
-    print(f"GPU: {data['gpu']}\n")
+    fn = breakdown.with_options(gpu=gpu)
+    data = json.loads(fn.remote(model, techniques, iters, warmup))
+    print(f"GPU: {data['gpu']}  |  lerobot commit: {data['lerobot_commit']}\n")
     for run in data["runs"]:
         if "error" in run:
             print(f"=== {run['technique']}  FAILED: {run['error']} ===\n")
             continue
         s = run["stages"]
         total = sum(v["p50_ms"] for v in s.values())
-        params = f"{run['model_dtype']} on {run['model_device']}"
-        print(f"=== {run['technique']}  (model params: {params}) ===")
-        print(f"  flow steps: {run['num_flow_steps']}  |  actions/chunk: {run['n_action_steps']}")
+        print(f"=== {run['technique']}  (on {run['model_device']}) ===")
+        print(f"  weights GB by dtype: {run['weights_gb_by_dtype']}")
+        print(f"  built precision: {run['built_precision']}")
+        print(f"  compile_model: {run['compile_model']}")
+        print(f"  warmup model ms: {[round(ms) for ms in run['warmup_model_ms']]}")
+        print(f"  actions finite: {run['actions_finite']}")
+        print(f"  denoise steps: {run['denoise_steps']}  |  actions/chunk: {run['n_action_steps']}")
         for stage in ("reset", "pre", "model", "post"):
             ms = s[stage]["p50_ms"]
             print(f"  {stage:<6} {ms:8.2f} ms  ({100 * ms / total:4.1f}%)")
@@ -203,6 +231,7 @@ def main(
     episodes_per_task: int = 10,  # x10 LIBERO-Object tasks = 100 episodes
     seed: int = 1000,
     batch_size: int = 10,
+    gpu: str = GPU,  # the row records the GPU that actually ran, read from torch
 ):
     from bench.row import write_row
 
@@ -214,7 +243,8 @@ def main(
     )
     git_sha = sha.stdout.strip() or "unknown"
 
-    row_json = benchmark.remote(model, technique, episodes_per_task, seed, batch_size, git_sha)
+    fn = benchmark.with_options(gpu=gpu)
+    row_json = fn.remote(model, technique, episodes_per_task, seed, batch_size, git_sha)
     row = json.loads(row_json)
     path = write_row(row, HERE / "results")
     print(json.dumps(row, indent=2))

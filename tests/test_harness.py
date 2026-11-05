@@ -6,14 +6,15 @@ lerobot-eval argv the wrapper builds per technique.
 """
 
 import argparse
+import types
 
 import pytest
 import torch
 
 from bench import profiler, row
 from bench._eval_entry import build_argv
-from bench.models import get_model
-from bench.techniques import get_technique
+from bench.models import get_model, speed_knobs
+from bench.techniques import cast_weights, get_technique
 
 
 def test_profiler_cpu_shape():
@@ -44,6 +45,8 @@ def test_build_row_with_success():
         checkpoint="smolvla_libero",
         gpu="NVIDIA A10G",
         technique="fp32",
+        denoise_steps=10,
+        n_action_steps=1,
         speed=_speed(),
         success={"success": 78.0, "ci_low": 68.0, "ci_high": 85.0, "episodes": 100},
         date="2026-11-02",
@@ -61,6 +64,8 @@ def test_build_row_speed_only():
         checkpoint="smolvla_libero",
         gpu="NVIDIA A10G",
         technique="fp32",
+        denoise_steps=10,
+        n_action_steps=1,
         speed=_speed(),
         success=None,
         date="2026-11-02",
@@ -78,6 +83,8 @@ def test_validate_row_rejects_missing_and_nonnumeric():
         checkpoint="c",
         gpu="g",
         technique="fp32",
+        denoise_steps=10,
+        n_action_steps=1,
         speed=_speed(),
         success=None,
         date="2026-11-02",
@@ -95,6 +102,8 @@ def test_default_filename_is_safe():
         checkpoint="smolvla_libero",
         gpu="NVIDIA A10G",
         technique="bf16",
+        denoise_steps=10,
+        n_action_steps=1,
         speed=_speed(),
         success=None,
         date="2026-11-02",
@@ -114,6 +123,8 @@ def test_write_row_roundtrip(tmp_path):
         checkpoint="smolvla_libero",
         gpu="A10G",
         technique="fp32",
+        denoise_steps=10,
+        n_action_steps=1,
         speed=_speed(),
         success={"success": 78.0, "ci_low": 68.0, "ci_high": 85.0, "episodes": 100},
         date="2026-11-02",
@@ -145,6 +156,7 @@ def _args(technique):
         seed=1000,
         device="cuda",
         output_dir="/tmp/eval/libero_object",
+        n_action_steps=None,
     )
 
 
@@ -165,3 +177,89 @@ def test_model_registry_one_entry():
     assert spec.suite == "libero_object"
     with pytest.raises(KeyError):
         get_model("nope")
+
+
+def test_pi05_spec():
+    spec = get_model("pi05")
+    assert spec.policy_path == "lerobot/pi05_libero_finetuned_v044"
+    assert spec.suite == "libero_object"
+    assert spec.n_action_steps == 10  # published eval setting, not the stored 50
+
+
+def test_speed_knobs_read_each_models_config_attr():
+    smolvla = types.SimpleNamespace(num_steps=10, n_action_steps=1)
+    assert speed_knobs(get_model("smolvla"), smolvla) == {"denoise_steps": 10, "n_action_steps": 1}
+    pi05 = types.SimpleNamespace(num_inference_steps=10, n_action_steps=10)
+    assert speed_knobs(get_model("pi05"), pi05) == {"denoise_steps": 10, "n_action_steps": 10}
+    with pytest.raises(AttributeError):  # a missing attribute must not become a silent default
+        speed_knobs(get_model("pi05"), smolvla)
+
+
+def test_validate_row_rejects_bad_knobs():
+    good = row.build_row(
+        model="smolvla",
+        checkpoint="c",
+        gpu="g",
+        technique="fp32",
+        denoise_steps=10,
+        n_action_steps=1,
+        speed=_speed(),
+        success=None,
+        date="2026-11-02",
+        lerobot_version="0.6.2",
+        git_sha="sha",
+    )
+    for bad in (-1, 0, None, "10"):
+        with pytest.raises(ValueError):
+            row.validate_row({**good, "denoise_steps": bad})
+
+
+def test_build_argv_passes_n_action_steps_only_when_set():
+    t = get_technique("native")
+    args = _args("native")
+    assert not any("n_action_steps" in a for a in build_argv(args, t))
+    args.n_action_steps = 10
+    assert "--policy.n_action_steps=10" in build_argv(args, t)
+
+
+def _mixed_policy(precision):
+    policy = torch.nn.Sequential(torch.nn.Linear(2, 2), torch.nn.Linear(2, 2))
+    policy[0].to(torch.bfloat16)
+    expert = types.SimpleNamespace(precision=precision)
+    policy.model = types.SimpleNamespace(paligemma_with_expert=expert)
+    return policy
+
+
+def test_cast_weights_casts_all_and_updates_cached_precision():
+    policy = _mixed_policy(torch.bfloat16)
+    cast_weights(policy, torch.float32)
+    assert {p.dtype for p in policy.parameters()} == {torch.float32}
+    assert policy.model.paligemma_with_expert.precision is torch.float32
+
+
+def test_cast_weights_without_expert():
+    policy = torch.nn.Linear(2, 2).to(torch.bfloat16)
+    cast_weights(policy, torch.float32)
+    assert policy.weight.dtype == torch.float32
+
+
+def test_backfill_adds_knobs_in_schema_order_and_keeps_measurements():
+    from scripts.backfill_speed_knobs import backfill
+
+    old = row.build_row(
+        model="smolvla",
+        checkpoint="c",
+        gpu="g",
+        technique="native",
+        denoise_steps=10,
+        n_action_steps=1,
+        speed=_speed(),
+        success=None,
+        date="2026-11-02",
+        lerobot_version="0.6.2",
+        git_sha="sha",
+    )
+    del old["denoise_steps"], old["n_action_steps"]
+    new = backfill(old, {"denoise_steps": 10, "n_action_steps": 1})
+    assert list(new) == list(row.FIELDS)
+    assert {k: new[k] for k in old} == old

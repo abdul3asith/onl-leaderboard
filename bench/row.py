@@ -15,6 +15,8 @@ FIELDS = (
     "checkpoint",
     "gpu",
     "technique",
+    "denoise_steps",
+    "n_action_steps",
     "p50_ms",
     "p99_ms",
     "jitter_ms",
@@ -38,6 +40,8 @@ def build_row(
     checkpoint: str,
     gpu: str,
     technique: str,
+    denoise_steps: int,
+    n_action_steps: int,
     speed: dict,
     success: dict | None,
     date: str,
@@ -50,6 +54,8 @@ def build_row(
         "checkpoint": checkpoint,
         "gpu": gpu,
         "technique": technique,
+        "denoise_steps": denoise_steps,
+        "n_action_steps": n_action_steps,
         "p50_ms": speed["p50_ms"],
         "p99_ms": speed["p99_ms"],
         "jitter_ms": speed["jitter_ms"],
@@ -78,6 +84,9 @@ def validate_row(row: dict) -> dict:
     for field in _SPEED_FIELDS:
         if not isinstance(row[field], numbers.Real):
             raise ValueError(f"{field} must be numeric, got {row[field]!r}")
+    for field in ("denoise_steps", "n_action_steps"):
+        if not isinstance(row[field], int) or row[field] < 1:
+            raise ValueError(f"{field} must be a positive int, got {row[field]!r}")
     for field in ("model", "technique", "gpu", "date", "git_sha"):
         if not row[field]:
             raise ValueError(f"{field} must be a non-empty string")

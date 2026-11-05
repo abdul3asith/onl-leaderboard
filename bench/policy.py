@@ -13,7 +13,7 @@ import importlib
 import torch
 
 from .models import ModelSpec
-from .techniques import Technique
+from .techniques import Technique, cast_weights
 
 
 def load_policy(spec: ModelSpec, device: str, technique: Technique | None = None) -> dict:
@@ -29,9 +29,12 @@ def load_policy(spec: ModelSpec, device: str, technique: Technique | None = None
     policy_cls = getattr(module, spec.policy_class)
 
     policy = policy_cls.from_pretrained(spec.policy_path)
+    if spec.n_action_steps is not None:
+        policy.config.n_action_steps = spec.n_action_steps
+        policy.reset()  # the action queue's maxlen comes from n_action_steps
     policy.to(device)
     if technique is not None and technique.cast_dtype is not None:
-        policy.to(technique.cast_dtype)
+        cast_weights(policy, technique.cast_dtype)
     policy.eval()
     pre, post = make_pre_post_processors(policy.config, pretrained_path=spec.policy_path)
     return {"policy": policy, "pre": pre, "post": post, "spec": spec}
@@ -39,9 +42,12 @@ def load_policy(spec: ModelSpec, device: str, technique: Technique | None = None
 
 def make_observation(bundle: dict, device: str) -> dict:
     """Synthetic observation with exactly the shapes the policy expects
-    (cameras + state), plus the task text."""
+    (cameras + state), plus the task text. Empty cameras stay absent, as in the
+    LIBERO env: the policy pads and masks them itself."""
     obs = {}
     for key, feature in bundle["policy"].config.input_features.items():
+        if "empty_camera" in key:
+            continue
         kind = str(feature.type)
         if "VISUAL" in kind or "STATE" in kind:
             obs[key] = torch.rand(1, *feature.shape, device=device)

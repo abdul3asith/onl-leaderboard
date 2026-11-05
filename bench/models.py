@@ -20,6 +20,8 @@ class ModelSpec:
     task: str  # natural-language task for the synthetic speed observation
     suite: str = "libero_object"  # LIBERO suite for success eval
     checkpoint: str = "main"  # recorded in the row
+    denoise_attr: str = "num_steps"  # policy-config attribute holding the denoise step count
+    n_action_steps: int | None = None  # overrides the checkpoint's value; None = as stored
 
 
 MODELS: dict[str, ModelSpec] = {
@@ -32,7 +34,27 @@ MODELS: dict[str, ModelSpec] = {
         suite="libero_object",
         checkpoint="smolvla_libero",
     ),
+    "pi05": ModelSpec(
+        name="pi05",
+        policy_path="lerobot/pi05_libero_finetuned_v044",
+        policy_module="lerobot.policies.pi05.modeling_pi05",
+        policy_class="PI05Policy",
+        task="pick up the ketchup and place it in the basket",
+        suite="libero_object",
+        checkpoint="pi05_libero_finetuned_v044",
+        denoise_attr="num_inference_steps",
+        # The checkpoint stores 50; LeRobot's published LIBERO scores pass 10 on the CLI.
+        n_action_steps=10,
+    ),
 }
+
+
+def speed_knobs(spec: ModelSpec, config) -> dict:
+    """The two row fields that drive speed, read from the policy config that runs."""
+    return {
+        "denoise_steps": int(getattr(config, spec.denoise_attr)),
+        "n_action_steps": int(config.n_action_steps),
+    }
 
 
 def get_model(name: str) -> ModelSpec:

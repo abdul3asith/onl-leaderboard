@@ -5,7 +5,7 @@ shouldn't be?" by timing each stage of `act` separately with CUDA events and
 reporting the device + dtype of every tensor the preprocessor hands the model.
 
 Note on semantics: `act` calls `policy.reset()` every step, so each timed step
-runs a *full* chunk generation (VLM encode + `num_steps` flow-matching
+runs a *full* chunk generation (VLM encode + `denoise_steps` flow-matching
 iterations producing `n_action_steps` actions), not a single control step. The
 amortized per-control-step cost is `model_ms / n_action_steps`.
 """
@@ -18,6 +18,7 @@ from contextlib import nullcontext
 import numpy as np
 import torch
 
+from .models import speed_knobs
 from .policy import make_observation
 from .techniques import Technique
 
@@ -51,6 +52,15 @@ def _describe_batch(batch: dict) -> list[dict]:
     return rows
 
 
+def _weights_by_dtype(policy) -> dict[str, float]:
+    """GB of floating-point weights per dtype; pi05 ships a bf16/float32 mix."""
+    sizes: dict[str, float] = {}
+    for p in policy.parameters():
+        if p.is_floating_point():
+            sizes[str(p.dtype)] = sizes.get(str(p.dtype), 0.0) + p.numel() * p.element_size() / 1e9
+    return sizes
+
+
 def _stats(xs: list[float]) -> dict:
     a = np.array(xs)
     return {
@@ -68,6 +78,8 @@ def breakdown(bundle: dict, technique: Technique, device: str, iters: int = 50, 
     autocast = (lambda: torch.autocast(device_type=device, dtype=ac)) if ac else nullcontext
 
     stages: dict[str, list[float]] = {"reset": [], "pre": [], "model": [], "post": []}
+    warmup_model_ms: list[float] = []
+    actions_finite = True
     batch_desc: list[dict] | None = None
 
     for i in range(warmup + iters):
@@ -85,6 +97,9 @@ def breakdown(bundle: dict, technique: Technique, device: str, iters: int = 50, 
                 dt, action = _time_ms(lambda b=batch: policy.select_action(b), device)
             if record:
                 stages["model"].append(dt)
+            else:
+                warmup_model_ms.append(dt)
+            actions_finite = actions_finite and bool(torch.isfinite(action).all())
 
             dt, _ = _time_ms(lambda a=action: post(a), device)
             if record:
@@ -95,15 +110,19 @@ def breakdown(bundle: dict, technique: Technique, device: str, iters: int = 50, 
 
     param = next(policy.parameters())
     model_ms = _stats(stages["model"])["p50_ms"]
-    n_action_steps = int(policy.config.n_action_steps)
+    knobs = speed_knobs(bundle["spec"], policy.config)
+    expert = getattr(getattr(policy, "model", None), "paligemma_with_expert", None)
     return {
         "technique": technique.name,
         "model_device": str(param.device),
-        "model_dtype": str(param.dtype),
-        "n_action_steps": n_action_steps,
-        "num_flow_steps": int(getattr(policy.config, "num_steps", -1)),
+        "weights_gb_by_dtype": _weights_by_dtype(policy),
+        "built_precision": str(getattr(expert, "precision", None)),
+        "compile_model": bool(getattr(policy.config, "compile_model", False)),
+        "warmup_model_ms": warmup_model_ms,
+        "actions_finite": actions_finite,
+        **knobs,
         "batch": batch_desc,
         "cpu_tensors_in_batch": [r for r in (batch_desc or []) if r["device"] == "cpu"],
         "stages": {k: _stats(v) for k, v in stages.items()},
-        "amortized_per_action_ms": model_ms / n_action_steps,
+        "amortized_per_action_ms": model_ms / knobs["n_action_steps"],
     }

@@ -21,7 +21,7 @@ import sys
 
 import torch
 
-from .techniques import Technique, get_technique
+from .techniques import Technique, cast_weights, get_technique
 
 
 def _install_weight_cast(dtype: torch.dtype) -> None:
@@ -31,11 +31,8 @@ def _install_weight_cast(dtype: torch.dtype) -> None:
 
     def make_policy_cast(*args, **kwargs):
         policy = original_make_policy(*args, **kwargs)
-        policy.to(dtype)
+        cast_weights(policy, dtype)
         policy.eval()
-        got = next(policy.parameters()).dtype
-        if got != dtype:
-            raise RuntimeError(f"weight cast failed: wanted {dtype}, got {got}")
         return policy
 
     evalmod.make_policy = make_policy_cast
@@ -50,7 +47,7 @@ def _apply_autocast_dtype(device: str, dtype: torch.dtype) -> None:
 
 def build_argv(args: argparse.Namespace, technique: Technique) -> list[str]:
     use_amp = technique.autocast_dtype is not None
-    return [
+    argv = [
         "lerobot-eval",
         f"--policy.path={args.policy_path}",
         f"--policy.device={args.device}",
@@ -62,6 +59,9 @@ def build_argv(args: argparse.Namespace, technique: Technique) -> list[str]:
         f"--seed={args.seed}",
         f"--output_dir={args.output_dir}",
     ]
+    if args.n_action_steps is not None:
+        argv.append(f"--policy.n_action_steps={args.n_action_steps}")
+    return argv
 
 
 def main() -> None:
@@ -74,6 +74,7 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=1000)
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--output-dir", required=True)
+    ap.add_argument("--n-action-steps", type=int, default=None)
     args = ap.parse_args()
 
     technique = get_technique(args.technique)
