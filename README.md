@@ -87,6 +87,7 @@ size, which `compile_s` does not cover.
 | `modal_app.py` | Modal app + `modal run` entrypoint |
 | `board/app.py` | the leaderboard Space; reads `results/*.json` and `CLAUDE.md` |
 | `scripts/update_readme.py` | regenerates the README's results section |
+| `docs/workflows.md` | terminology, concepts and workflows behind the results |
 
 ## One GPU
 
