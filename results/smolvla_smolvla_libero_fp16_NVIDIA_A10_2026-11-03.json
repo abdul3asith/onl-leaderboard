@@ -5,6 +5,7 @@
   "technique": "fp16",
   "denoise_steps": 10,
   "n_action_steps": 1,
+  "compile_s": null,
   "p50_ms": 524.1081848144531,
   "p99_ms": 543.4007879638672,
   "jitter_ms": 11.507763393825762,

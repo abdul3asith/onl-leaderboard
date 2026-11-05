@@ -5,6 +5,7 @@
   "technique": "native",
   "denoise_steps": 10,
   "n_action_steps": 1,
+  "compile_s": null,
   "p50_ms": 470.1487731933594,
   "p99_ms": 484.8569543457031,
   "jitter_ms": 13.146254106657128,
