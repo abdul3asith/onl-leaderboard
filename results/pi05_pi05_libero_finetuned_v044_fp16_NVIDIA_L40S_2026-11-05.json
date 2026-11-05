@@ -1,0 +1,23 @@
+{
+  "model": "pi05",
+  "checkpoint": "pi05_libero_finetuned_v044",
+  "gpu": "NVIDIA L40S",
+  "technique": "fp16",
+  "denoise_steps": 10,
+  "n_action_steps": 10,
+  "compile_s": null,
+  "p50_ms": 343.2173156738281,
+  "p99_ms": 355.438786315918,
+  "jitter_ms": 5.621319937616595,
+  "hz": 2.8134239663737453,
+  "peak_mb": 10584.010752,
+  "success": 98.0,
+  "ci_low": 92.9988209271456,
+  "ci_high": 99.44980324498376,
+  "episodes": 100,
+  "success_gpu": "NVIDIA A10",
+  "success_git_sha": "d772967",
+  "date": "2026-11-05",
+  "lerobot_version": "0.6.2",
+  "git_sha": "1cc46fe"
+}

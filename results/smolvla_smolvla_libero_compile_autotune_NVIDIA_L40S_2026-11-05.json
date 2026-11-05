@@ -1,0 +1,23 @@
+{
+  "model": "smolvla",
+  "checkpoint": "smolvla_libero",
+  "gpu": "NVIDIA L40S",
+  "technique": "compile_autotune",
+  "denoise_steps": 10,
+  "n_action_steps": 1,
+  "compile_s": 737.5730625,
+  "p50_ms": 32.76108741760254,
+  "p99_ms": 36.855771827697744,
+  "jitter_ms": 1.6475063926201197,
+  "hz": 27.132792244184746,
+  "peak_mb": 1266.479616,
+  "success": 77.0,
+  "ci_low": 67.84561697712623,
+  "ci_high": 84.15673411969654,
+  "episodes": 100,
+  "success_gpu": "NVIDIA L40S",
+  "success_git_sha": "474ef21",
+  "date": "2026-11-05",
+  "lerobot_version": "0.6.2",
+  "git_sha": "474ef21"
+}
