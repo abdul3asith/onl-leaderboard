@@ -532,3 +532,15 @@ def test_merge_refuses_a_speed_row_off_the_pinned_gpu(tmp_path):
     _write(tmp_path, gpu="NVIDIA A10G")
     with pytest.raises(RuntimeError):
         merge_all(tmp_path)
+
+
+def test_committed_rows_are_valid_and_share_the_pinned_gpu():
+    import json
+    from pathlib import Path
+
+    rows = [json.loads(p.read_text()) for p in Path("results").glob("*.json")]
+    assert rows
+    for r in rows:
+        row.validate_row(r)
+        assert r["gpu"] == row.PINNED_GPU  # speed is only comparable on one card
+        assert r["episodes"] == 100 and r["success"] is not None
