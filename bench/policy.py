@@ -14,7 +14,7 @@ import importlib
 import torch
 
 from .models import ModelSpec
-from .techniques import COMPILE_MODE, Technique, cast_weights, check_compile
+from .techniques import Technique, cast_weights, check_compile
 
 
 def load_policy(spec: ModelSpec, device: str, technique: Technique) -> dict:
@@ -32,7 +32,8 @@ def load_policy(spec: ModelSpec, device: str, technique: Technique) -> dict:
 
     config = PreTrainedConfig.from_pretrained(spec.policy_path)
     config.compile_model = technique.compile_model
-    config.compile_mode = COMPILE_MODE
+    if technique.compile_model:
+        config.compile_mode = technique.compile_mode
     if spec.n_action_steps is not None:
         config.n_action_steps = spec.n_action_steps
 

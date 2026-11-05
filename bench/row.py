@@ -17,6 +17,7 @@ FIELDS = (
     "technique",
     "denoise_steps",
     "n_action_steps",
+    "compile_s",
     "p50_ms",
     "p99_ms",
     "jitter_ms",
@@ -42,6 +43,7 @@ def build_row(
     technique: str,
     denoise_steps: int,
     n_action_steps: int,
+    compile_s: float | None,
     speed: dict,
     success: dict | None,
     date: str,
@@ -56,6 +58,7 @@ def build_row(
         "technique": technique,
         "denoise_steps": denoise_steps,
         "n_action_steps": n_action_steps,
+        "compile_s": compile_s,
         "p50_ms": speed["p50_ms"],
         "p99_ms": speed["p99_ms"],
         "jitter_ms": speed["jitter_ms"],
@@ -87,6 +90,12 @@ def validate_row(row: dict) -> dict:
     for field in ("denoise_steps", "n_action_steps"):
         if not isinstance(row[field], int) or row[field] < 1:
             raise ValueError(f"{field} must be a positive int, got {row[field]!r}")
+    # A number on a compiled row only, null otherwise: 0.0 would read as a measurement.
+    if row["technique"].startswith("compile"):
+        if not isinstance(row["compile_s"], numbers.Real) or row["compile_s"] <= 0:
+            raise ValueError(f"compile_s must be positive, got {row['compile_s']!r}")
+    elif row["compile_s"] is not None:
+        raise ValueError(f"compile_s must be null when uncompiled, got {row['compile_s']!r}")
     for field in ("model", "technique", "gpu", "date", "git_sha"):
         if not row[field]:
             raise ValueError(f"{field} must be a non-empty string")

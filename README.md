@@ -10,7 +10,7 @@ modal run modal_app.py --model smolvla --technique native
 modal run modal_app.py --model smolvla --technique native --episodes-per-task 0
 
 # per-stage latency breakdown across techniques (speed only, no eval)
-modal run modal_app.py::breakdown_main --techniques native,fp32,fp16,compile
+modal run modal_app.py::breakdown_main --techniques native,fp32,fp16,compile,compile_autotune
 
 # a large model: pick the model and GPU; the row records the GPU that really ran
 modal run --detach modal_app.py --model pi05 --technique fp32 --gpu L40S
@@ -23,12 +23,17 @@ the license of [google/paligemma-3b-pt-224](https://huggingface.co/google/palige
 Techniques are **weight dtypes**: `native` (as the checkpoint ships — bf16 for
 the SmolVLA LIBERO checkpoint), `fp32`, `fp16`. Each casts the policy with
 `policy.to(dtype)` so the labelled precision is the precision that runs. `compile` is
-`native` plus `torch.compile` (`compile_model=true`, mode `max-autotune`).
+`native` plus `torch.compile` (`compile_model=true`) in torch's `default` mode;
+`compile_autotune` is the same in `max-autotune`, lerobot's default.
 
 **A row is either fully compiled or fully uncompiled.** The technique sets
 `compile_model` in both the speed path and the eval, overriding the checkpoint: pi05
 stores `true`, yet its `native`, `fp32` and `fp16` rows run uncompiled. A policy that
 does not match its label stops the run.
+
+`compile_s` is the wall time of the first call in the speed path (batch 1), including one
+ordinary step, and is null on uncompiled rows. The eval compiles again at its own batch
+size, which `compile_s` does not cover.
 
 ## Layout
 
@@ -41,7 +46,7 @@ does not match its label stops the run.
 | `bench/speed.py` | run the speed benchmark under one technique |
 | `bench/success.py` | run the LIBERO eval, read `eval_info.json` |
 | `bench/_eval_entry.py` | wrapper that drives lerobot-eval precision per technique |
-| `bench/row.py` | build + validate + write the 18-field result row |
+| `bench/row.py` | build + validate + write the 19-field result row |
 | `modal_app.py` | Modal app + `modal run` entrypoint |
 
 ## Precision & lerobot-eval

@@ -22,7 +22,7 @@ import sys
 
 import torch
 
-from .techniques import COMPILE_MODE, Technique, cast_weights, check_compile, get_technique
+from .techniques import Technique, cast_weights, check_compile, get_technique
 
 
 def _install_policy_hook(technique: Technique) -> None:
@@ -56,7 +56,6 @@ def build_argv(args: argparse.Namespace, technique: Technique) -> list[str]:
         f"--policy.device={args.device}",
         f"--policy.use_amp={'true' if use_amp else 'false'}",
         f"--policy.compile_model={'true' if technique.compile_model else 'false'}",
-        f"--policy.compile_mode={COMPILE_MODE}",
         "--env.type=libero",
         f"--env.task={args.suite}",
         f"--eval.n_episodes={args.episodes_per_task}",
@@ -64,6 +63,8 @@ def build_argv(args: argparse.Namespace, technique: Technique) -> list[str]:
         f"--seed={args.seed}",
         f"--output_dir={args.output_dir}",
     ]
+    if technique.compile_model:
+        argv.append(f"--policy.compile_mode={technique.compile_mode}")
     if args.n_action_steps is not None:
         argv.append(f"--policy.n_action_steps={args.n_action_steps}")
     return argv

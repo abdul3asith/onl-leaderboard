@@ -12,9 +12,12 @@ techniques use the lever that actually works for each precision:
 - ``fp16``   — ``torch.autocast(float16)`` over the native weights: the standard
   mixed-precision inference path, since weight-casting to fp16 is unsupported.
 - ``compile`` — ``native`` plus lerobot's ``compile_model`` switch, which wraps
-  ``sample_actions`` in ``torch.compile`` when the policy is built.
+  ``sample_actions`` in ``torch.compile`` when the policy is built, in torch's
+  ``default`` mode.
+- ``compile_autotune`` — the same in ``max-autotune`` mode, lerobot's default for both
+  models and pi05's stored setting. Compiles for minutes per run.
 
-Only ``compile`` compiles. Every other technique forces ``compile_model`` off, even
+Only these two compile. Every other technique forces ``compile_model`` off, even
 though pi05's checkpoint stores it on, so one row never mixes compiled and uncompiled
 numbers: the flag comes from the technique in both the speed path and the eval, and
 ``check_compile`` stops a run whose policy does not match its label.
@@ -39,16 +42,19 @@ class Technique:
     name: str
     cast_dtype: torch.dtype | None  # weight cast via policy.to(...); None = as shipped
     autocast_dtype: torch.dtype | None  # compute via torch.autocast(...); None = no autocast
-    compile_model: bool = False  # torch.compile sample_actions at build time
+    compile_mode: str | None = None  # torch.compile mode at build time; None = uncompiled
 
+    @property
+    def compile_model(self) -> bool:
+        return self.compile_mode is not None
 
-COMPILE_MODE = "max-autotune"  # lerobot's default for both models
 
 TECHNIQUES: dict[str, Technique] = {
     "native": Technique("native", None, None),
     "fp32": Technique("fp32", torch.float32, None),
     "fp16": Technique("fp16", None, torch.float16),
-    "compile": Technique("compile", None, None, compile_model=True),
+    "compile": Technique("compile", None, None, compile_mode="default"),
+    "compile_autotune": Technique("compile_autotune", None, None, compile_mode="max-autotune"),
 }
 
 

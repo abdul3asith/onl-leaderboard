@@ -28,7 +28,9 @@ def time_one_step(step_fn, device: str) -> float:
 
 
 def profile(step_fn, device: str, steps: int = TIMED, warmup: int = WARMUP) -> dict:
-    for _ in range(warmup):
+    # The first call does any torch.compile work; warmup steps are otherwise discarded.
+    first_call_ms = time_one_step(step_fn, device)
+    for _ in range(warmup - 1):
         step_fn()
 
     if device == "cuda":
@@ -45,4 +47,5 @@ def profile(step_fn, device: str, steps: int = TIMED, warmup: int = WARMUP) -> d
         "jitter_ms": float(timings.std()),  # spread: low = steady rhythm
         "hz": float(1000 / p99),  # steps/s the robot can count on (worst case)
         "peak_mb": float(peak_mb),
+        "first_call_ms": float(first_call_ms),
     }

@@ -134,6 +134,7 @@ def benchmark(
         gpu=gpu_name,
         technique=tech.name,
         **knobs,
+        compile_s=speed["first_call_ms"] / 1000 if tech.compile_model else None,
         speed=speed,
         success=success,
         date=dt.datetime.now(dt.UTC).strftime("%Y-%m-%d"),
@@ -211,7 +212,7 @@ def breakdown_main(
         print(f"=== {run['technique']}  (on {run['model_device']}) ===")
         print(f"  weights GB by dtype: {run['weights_gb_by_dtype']}")
         print(f"  built precision: {run['built_precision']}")
-        print(f"  compile_model: {run['compile_model']}")
+        print(f"  compile mode: {run['compile_mode']}")
         print(f"  warmup model ms: {[round(ms) for ms in run['warmup_model_ms']]}")
         print(f"  actions finite: {run['actions_finite']}")
         print(f"  denoise steps: {run['denoise_steps']}  |  actions/chunk: {run['n_action_steps']}")
@@ -229,7 +230,7 @@ def breakdown_main(
 @app.local_entrypoint()
 def main(
     model: str = "smolvla",
-    technique: str = "native",  # as the checkpoint ships; fp32/fp16/compile are extra rows
+    technique: str = "native",  # as the checkpoint ships; see bench/techniques.py for the rest
     episodes_per_task: int = 10,  # x10 LIBERO-Object tasks = 100 episodes
     seed: int = 1000,
     batch_size: int = 10,

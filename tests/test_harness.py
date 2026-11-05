@@ -15,7 +15,6 @@ from bench import profiler, row
 from bench._eval_entry import build_argv
 from bench.models import get_model, speed_knobs
 from bench.techniques import (
-    COMPILE_MODE,
     TECHNIQUES,
     cast_weights,
     check_compile,
@@ -31,7 +30,7 @@ def test_profiler_cpu_shape():
 
     stats = profiler.profile(step, "cpu", steps=5, warmup=3)
     assert calls["n"] == 8  # warmup + timed
-    assert set(stats) == {"p50_ms", "p99_ms", "jitter_ms", "hz", "peak_mb"}
+    assert set(stats) == {"p50_ms", "p99_ms", "jitter_ms", "hz", "peak_mb", "first_call_ms"}
     assert all(isinstance(v, float) for v in stats.values())
     assert stats["peak_mb"] == 0.0  # no CUDA on cpu
 
@@ -53,6 +52,7 @@ def test_build_row_with_success():
         technique="fp32",
         denoise_steps=10,
         n_action_steps=1,
+        compile_s=None,
         speed=_speed(),
         success={"success": 78.0, "ci_low": 68.0, "ci_high": 85.0, "episodes": 100},
         date="2026-11-02",
@@ -72,6 +72,7 @@ def test_build_row_speed_only():
         technique="fp32",
         denoise_steps=10,
         n_action_steps=1,
+        compile_s=None,
         speed=_speed(),
         success=None,
         date="2026-11-02",
@@ -91,6 +92,7 @@ def test_validate_row_rejects_missing_and_nonnumeric():
         technique="fp32",
         denoise_steps=10,
         n_action_steps=1,
+        compile_s=None,
         speed=_speed(),
         success=None,
         date="2026-11-02",
@@ -110,6 +112,7 @@ def test_default_filename_is_safe():
         technique="bf16",
         denoise_steps=10,
         n_action_steps=1,
+        compile_s=None,
         speed=_speed(),
         success=None,
         date="2026-11-02",
@@ -131,6 +134,7 @@ def test_write_row_roundtrip(tmp_path):
         technique="fp32",
         denoise_steps=10,
         n_action_steps=1,
+        compile_s=None,
         speed=_speed(),
         success={"success": 78.0, "ci_low": 68.0, "ci_high": 85.0, "episodes": 100},
         date="2026-11-02",
@@ -209,6 +213,7 @@ def test_validate_row_rejects_bad_knobs():
         technique="fp32",
         denoise_steps=10,
         n_action_steps=1,
+        compile_s=None,
         speed=_speed(),
         success=None,
         date="2026-11-02",
@@ -230,20 +235,36 @@ def test_build_argv_passes_n_action_steps_only_when_set():
 
 @pytest.mark.parametrize(
     "tech,compiled",
-    [("native", False), ("fp32", False), ("fp16", False), ("compile", True)],
+    [
+        ("native", False),
+        ("fp32", False),
+        ("fp16", False),
+        ("compile", True),
+        ("compile_autotune", True),
+    ],
 )
 def test_build_argv_compile_flag_is_always_explicit(tech, compiled):
     # Always passed, so a checkpoint's stored compile_model can never leak into a row.
     argv = build_argv(_args(tech), get_technique(tech))
     assert f"--policy.compile_model={'true' if compiled else 'false'}" in argv
-    assert "--policy.compile_mode=max-autotune" in argv
+    assert any(a.startswith("--policy.compile_mode=") for a in argv) == compiled
 
 
-def test_only_the_compile_technique_compiles():
-    compiled = {name for name, t in TECHNIQUES.items() if t.compile_model}
-    assert compiled == {"compile"}
-    compile_tech = get_technique("compile")
-    assert compile_tech.cast_dtype is None and compile_tech.autocast_dtype is None
+@pytest.mark.parametrize(
+    "tech,mode",
+    [("compile", "default"), ("compile_autotune", "max-autotune")],
+)
+def test_compile_techniques_name_their_mode(tech, mode):
+    assert f"--policy.compile_mode={mode}" in build_argv(_args(tech), get_technique(tech))
+
+
+def test_only_the_compile_techniques_compile():
+    compiled = {name: t for name, t in TECHNIQUES.items() if t.compile_model}
+    assert set(compiled) == {"compile", "compile_autotune"}
+    # native + compile: no precision lever may join them, and row validation keys on the name.
+    for name, t in compiled.items():
+        assert t.cast_dtype is None and t.autocast_dtype is None
+        assert name.startswith("compile")
 
 
 def test_check_compile_stops_a_mismatched_policy():
@@ -256,7 +277,7 @@ def test_check_compile_stops_a_mismatched_policy():
     with pytest.raises(RuntimeError):
         check_compile(policy, get_technique("compile"))
 
-    policy.model.sample_actions = torch.compile(policy.model.sample_actions, mode=COMPILE_MODE)
+    policy.model.sample_actions = torch.compile(policy.model.sample_actions, mode="default")
     check_compile(policy, get_technique("compile"))
     with pytest.raises(RuntimeError):
         check_compile(policy, get_technique("native"))
@@ -293,13 +314,78 @@ def test_backfill_adds_knobs_in_schema_order_and_keeps_measurements():
         technique="native",
         denoise_steps=10,
         n_action_steps=1,
+        compile_s=None,
         speed=_speed(),
         success=None,
         date="2026-11-02",
         lerobot_version="0.6.2",
         git_sha="sha",
     )
-    del old["denoise_steps"], old["n_action_steps"]
+    del old["denoise_steps"], old["n_action_steps"], old["compile_s"]
     new = backfill(old, {"denoise_steps": 10, "n_action_steps": 1})
     assert list(new) == list(row.FIELDS)
     assert {k: new[k] for k in old} == old
+    assert new["compile_s"] is None
+
+
+def test_backfill_never_invents_compile_s_for_a_compiled_row():
+    from scripts.backfill_speed_knobs import backfill
+
+    good = _row_with_compile_s("compile", 12.5)
+    del good["compile_s"]
+    with pytest.raises(ValueError):
+        backfill(good, {"denoise_steps": 10, "n_action_steps": 1})
+
+
+def _row_with_compile_s(technique, compile_s):
+    return {
+        **row.build_row(
+            model="smolvla",
+            checkpoint="c",
+            gpu="g",
+            technique="native",
+            denoise_steps=10,
+            n_action_steps=1,
+            compile_s=None,
+            speed=_speed(),
+            success=None,
+            date="2026-11-02",
+            lerobot_version="0.6.2",
+            git_sha="sha",
+        ),
+        "technique": technique,
+        "compile_s": compile_s,
+    }
+
+
+@pytest.mark.parametrize(
+    "technique,compile_s,ok",
+    [
+        ("native", None, True),
+        ("native", 0.0, False),
+        ("fp32", 3.0, False),
+        ("compile", 12.5, True),
+        ("compile", None, False),
+        ("compile", 0.0, False),
+        ("compile_autotune", 510.0, True),
+        ("compile_autotune", None, False),
+    ],
+)
+def test_validate_row_ties_compile_s_to_the_technique(technique, compile_s, ok):
+    candidate = _row_with_compile_s(technique, compile_s)
+    if ok:
+        row.validate_row(candidate)
+    else:
+        with pytest.raises(ValueError):
+            row.validate_row(candidate)
+
+
+def test_profiler_first_call_is_timed_and_counts_as_warmup():
+    calls = {"n": 0}
+
+    def step():
+        calls["n"] += 1
+
+    stats = profiler.profile(step, "cpu", steps=2, warmup=10)
+    assert calls["n"] == 12  # still 10 warmup, not 11
+    assert stats["first_call_ms"] >= 0
