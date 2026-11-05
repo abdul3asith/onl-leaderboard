@@ -57,9 +57,10 @@ Needs a Modal secret `huggingface` holding `HF_TOKEN`, from an account that has 
 the license of [google/paligemma-3b-pt-224](https://huggingface.co/google/paligemma-3b-pt-224)
 (pi05's gated tokenizer).
 
-Techniques are **weight dtypes**: `native` (as the checkpoint ships — bf16 for
-the SmolVLA LIBERO checkpoint), `fp32`, `fp16`. Each casts the policy with
-`policy.to(dtype)` so the labelled precision is the precision that runs. `compile` is
+Techniques set how the policy computes: `native` runs as the checkpoint ships (bf16 for
+the SmolVLA LIBERO checkpoint), `fp32` casts the weights with `policy.to(float32)`, and
+`fp16` uses `torch.autocast(float16)` over the native weights, because a weight cast
+crashes SmolVLA. `compile` is
 `native` plus `torch.compile` (`compile_model=true`) in torch's `default` mode;
 `compile_autotune` is the same in `max-autotune`, lerobot's default.
 
