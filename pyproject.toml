@@ -16,6 +16,14 @@ dev = [
     "ruff>=0.6",
     "pytest>=8",
 ]
+# The leaderboard Space. Its own group so the Space's requirements stay this small.
+board = [
+    "gradio>=5",
+    "plotly>=5",
+]
+
+[tool.uv]
+default-groups = ["dev", "board"]
 
 [tool.ruff]
 line-length = 100
