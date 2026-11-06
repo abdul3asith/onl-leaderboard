@@ -22,6 +22,11 @@ in `results/*.json` and the README's "Latest results"; the rules live in `CLAUDE
 | `peak_mb` | Peak GPU memory allocated during the timed steps |
 | `compile_s` | Wall time of the first call on a compiled row; null when uncompiled |
 | 95% CI | Wilson interval on success, reported by LeRobot's eval |
+| Episode record | One line in `results/episodes/<row_id>.jsonl`: task, initial state, seed, outcome |
+| Paired evaluation | A technique and `native` run the same episodes, compared one by one |
+| AIF | Acceleration-induced failure: `native` succeeds on an episode and the technique fails it |
+| `aif_upper` | Hoeffding–Bentkus upper bound on the true AIF rate, at 95% confidence |
+| `certified` | `aif_upper` ≤ 0.05, the risk budget |
 | Pinned GPU | The one card all speed is measured on: NVIDIA L40S |
 | Modal | Cloud GPU platform that runs all GPU work; a Volume is its persistent storage |
 | Space | Hugging Face app hosting; the leaderboard is a Gradio Space |
@@ -50,6 +55,28 @@ p99 time a full plan rather than popping a cached action.
 
 **Success** runs the official `lerobot-eval` loop in a subprocess: 10 episodes × 10 tasks,
 seed 1000. `--eval.n_episodes` is per task, so pass 10 and read back 100.
+
+**Paired evaluation.** An episode is a task, a LIBERO initial state and a seed. Two things make
+a technique meet exactly the episodes `native` met, and both apply to every technique:
+
+- The policy's noise is reseeded at the start of each episode from its task and seed. LeRobot's
+  loop draws noise from one stream for the whole eval, so an episode ending one step earlier
+  would shift the noise of every episode after it.
+- Each plan's starting noise is drawn outside compiled code and passed in. `torch.compile`
+  generates random numbers its own way, so a compiled policy would otherwise start from
+  different noise than `native` under the same seed. The speed run is unchanged.
+
+Each episode record carries fingerprints of the simulator state it started from
+(`init_state_hash`), the first observation (`obs_hash`) and the first noise (`noise_hash`).
+Pairing refuses episodes whose state or noise differ. A record file exists under its final name
+only once its totals equal LeRobot's own.
+
+**Certification.** `aif_count` is the number of paired episodes where `native` succeeded and the
+technique failed, `aif_rate` is that over all paired episodes, and `aif_upper` bounds the true
+rate with 95% confidence. A row is `certified` when `aif_upper` ≤ 0.05. At 100 episodes that
+takes zero AIFs: one already gives an upper bound above 0.05. `native` rows and rows without
+paired episodes carry nulls. Two `native` evals of the same episodes show how often an outcome
+flips with no technique involved, which is the floor any AIF count sits on.
 
 **One GPU.** Speed is only comparable on one card. Modal's `A10` served both A10 and A10G, which
 differed noticeably on the same work, so rows are pinned and a run on any other card stops.
@@ -115,7 +142,28 @@ uv run python scripts/merge_speed_rows.py results/
 The merge refuses mismatched settings, an off-pin speed row, or anything but exactly one evaluated
 partner, and writes nothing unless every pair is valid.
 
-**7. Update and check**
+**7. Run a paired eval and certify.** Eval only, no speed run; one command per technique,
+`native` included. Each writes `episodes/<row_id>.jsonl` to the Volume and never overwrites one:
+
+```bash
+modal run --detach modal_app.py::eval_main --model smolvla --technique native
+modal run --detach modal_app.py::eval_main --model smolvla --technique compile_autotune
+modal volume get onl-bench-results episodes/ results/
+uv run python scripts/certify_rows.py results/
+```
+
+`certify_rows.py` sets each row's success from its episodes and, for every technique but
+`native`, its four certification fields. To measure how repeatable `native` is, run it again
+under a tag and compare:
+
+```bash
+modal run --detach modal_app.py::eval_main --model smolvla --technique native --tag repeat
+uv run python scripts/match_rate.py results/episodes/<native>.jsonl results/episodes/<native>__repeat.jsonl
+```
+
+`--task-ids 0 --episodes-per-task 2 --tag smoke` runs two episodes of one task as a smoke test.
+
+**8. Update and check**
 
 ```bash
 uv run python scripts/update_readme.py
@@ -124,7 +172,7 @@ uv run pytest
 uv run python board/app.py   # http://127.0.0.1:7860
 ```
 
-**8. Publish the board** with a write token. This sends only what the Space needs and drops rows
+**9. Publish the board** with a write token. This sends only what the Space needs and drops rows
 no longer in `results/`:
 
 ```bash
