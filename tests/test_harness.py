@@ -169,6 +169,7 @@ def _args(technique):
         device="cuda",
         output_dir="/tmp/eval/libero_object",
         n_action_steps=None,
+        task_ids="",
     )
 
 

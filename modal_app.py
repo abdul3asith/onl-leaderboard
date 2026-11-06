@@ -5,6 +5,10 @@
 runs the speed benchmark and the LIBERO success eval on a GPU and writes one
 JSON row to results/. Use --episodes-per-task 0 to skip the (paid) success eval
 and get a speed-only row for a cheap smoke test.
+
+    modal run --detach modal_app.py::eval_main --model smolvla --technique native
+
+runs only the eval and writes its per-episode outcomes to the Volume.
 """
 
 from __future__ import annotations
@@ -94,6 +98,7 @@ def benchmark(
 
     import torch
 
+    from bench.episodes import episodes_id
     from bench.models import get_model, speed_knobs
     from bench.policy import free_gpu, load_policy
     from bench.row import build_row, require_pinned_gpu, write_row
@@ -117,6 +122,7 @@ def benchmark(
 
     success = None
     if episodes_per_task > 0:
+        name = episodes_id(spec.name, spec.checkpoint, tech.name, spec.suite)
         success = run_success(
             spec,
             tech,
@@ -125,6 +131,9 @@ def benchmark(
             batch_size=batch_size,
             device=device,
             output_dir=f"/tmp/eval/{spec.suite}",
+            episodes_path=f"{RESULTS_VOL_DIR}/episodes/{name}.jsonl",
+            gpu=gpu_name,
+            git_sha=git_sha,
         )
     hf_cache.commit()
 
@@ -146,6 +155,63 @@ def benchmark(
     write_row(row, RESULTS_VOL_DIR)
     results_vol.commit()
     return json.dumps(row)
+
+
+@app.function(
+    gpu=GPU,
+    timeout=7200,
+    volumes={"/root/.cache/huggingface": hf_cache, RESULTS_VOL_DIR: results_vol},
+    secrets=[hf_secret],
+)
+def evaluate(
+    model: str,
+    technique: str,
+    episodes_per_task: int,
+    seed: int,
+    batch_size: int,
+    git_sha: str,
+    tag: str,
+    task_ids: str,
+) -> str:
+    """Run only the paired LIBERO eval; its per-episode outcomes go to the Volume."""
+    import os
+    import sys
+
+    os.chdir("/root/app")
+    sys.path.insert(0, "/root/app")
+    # Compiled kernels persist on the Volume, so a config is not compiled from scratch twice.
+    # Only here: the speed run's compile_s must keep timing a cold compile.
+    os.environ["TORCHINDUCTOR_CACHE_DIR"] = f"{RESULTS_VOL_DIR}/compile_cache"
+
+    import torch
+
+    from bench.episodes import episodes_id
+    from bench.models import get_model
+    from bench.row import require_pinned_gpu
+    from bench.success import run_success
+    from bench.techniques import get_technique
+
+    spec = get_model(model)
+    tech = get_technique(technique)
+    gpu_name = require_pinned_gpu(torch.cuda.get_device_name(0))
+    name = episodes_id(spec.name, spec.checkpoint, tech.name, spec.suite, tag)
+
+    success = run_success(
+        spec,
+        tech,
+        episodes_per_task=episodes_per_task,
+        seed=seed,
+        batch_size=batch_size,
+        device="cuda",
+        output_dir=f"/tmp/eval/{name}",
+        episodes_path=f"{RESULTS_VOL_DIR}/episodes/{name}.jsonl",
+        gpu=gpu_name,
+        git_sha=git_sha,
+        task_ids=task_ids,
+    )
+    hf_cache.commit()
+    results_vol.commit()
+    return json.dumps({"episodes_file": f"episodes/{name}.jsonl", **success})
 
 
 @app.function(
@@ -193,6 +259,16 @@ def breakdown(model: str, techniques: str, iters: int, warmup: int) -> str:
     return json.dumps(results)
 
 
+def _git_sha() -> str:
+    sha = subprocess.run(
+        ["git", "rev-parse", "--short", "HEAD"],
+        cwd=HERE,
+        capture_output=True,
+        text=True,
+    )
+    return sha.stdout.strip() or "unknown"
+
+
 @app.local_entrypoint()
 def breakdown_main(
     model: str = "smolvla",
@@ -236,16 +312,29 @@ def main(
 ):
     from bench.row import write_row
 
-    sha = subprocess.run(
-        ["git", "rev-parse", "--short", "HEAD"],
-        cwd=HERE,
-        capture_output=True,
-        text=True,
-    )
-    git_sha = sha.stdout.strip() or "unknown"
-
-    row_json = benchmark.remote(model, technique, episodes_per_task, seed, batch_size, git_sha)
+    row_json = benchmark.remote(model, technique, episodes_per_task, seed, batch_size, _git_sha())
     row = json.loads(row_json)
     path = write_row(row, HERE / "results")
     print(json.dumps(row, indent=2))
     print(f"\nwrote {path}")
+
+
+@app.local_entrypoint()
+def eval_main(
+    model: str = "smolvla",
+    technique: str = "native",
+    episodes_per_task: int = 10,  # x10 LIBERO-Object tasks = 100 episodes
+    seed: int = 1000,
+    batch_size: int = 1,
+    tag: str = "",  # names a repeat of an eval that already has episodes, e.g. "repeat"
+    task_ids: str = "",  # comma-separated subset of tasks, for a smoke test; needs a tag
+):
+    if (task_ids or episodes_per_task != 10) and not tag:
+        raise SystemExit("a partial eval needs --tag, so it cannot pass for the full one")
+    out = json.loads(
+        evaluate.remote(
+            model, technique, episodes_per_task, seed, batch_size, _git_sha(), tag, task_ids
+        )
+    )
+    print(json.dumps(out, indent=2))
+    print(f"\nmodal volume get onl-bench-results {out['episodes_file']} results/episodes/")

@@ -21,7 +21,10 @@ from bench.row import require_pinned_gpu, validate_row, write_row  # noqa: E402
 
 _KEY = ("model", "checkpoint", "technique")
 _MUST_MATCH = ("denoise_steps", "n_action_steps", "lerobot_version")
-_SUCCESS = ("success", "ci_low", "ci_high", "episodes", "success_gpu", "success_git_sha")
+_SUCCESS = (
+    *("success", "ci_low", "ci_high", "episodes", "success_gpu", "success_git_sha"),
+    *("aif_count", "aif_rate", "aif_upper", "certified"),  # they describe the same eval
+)
 
 
 def merge_all(results_dir: str | Path) -> None:

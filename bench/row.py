@@ -29,12 +29,18 @@ FIELDS = (
     "episodes",
     "success_gpu",
     "success_git_sha",
+    "aif_count",
+    "aif_rate",
+    "aif_upper",
+    "certified",
     "date",
     "lerobot_version",
     "git_sha",
 )
 
 _SPEED_FIELDS = ("p50_ms", "p99_ms", "jitter_ms", "hz", "peak_mb")
+# Certification against native over paired episodes; scripts/certify_rows.py fills them.
+_AIF_FIELDS = ("aif_count", "aif_rate", "aif_upper", "certified")
 
 # Speed is only comparable on one card. Modal's "A10" served both an A10 and an A10G,
 # about 27% apart on the same pi05 work, so rows are pinned to one type and checked.
@@ -83,6 +89,7 @@ def build_row(
         "episodes": success["episodes"] if success else 0,
         "success_gpu": gpu if success else None,
         "success_git_sha": git_sha if success else None,
+        **dict.fromkeys(_AIF_FIELDS),
         "date": date,
         "lerobot_version": lerobot_version,
         "git_sha": git_sha,
@@ -118,10 +125,31 @@ def validate_row(row: dict) -> dict:
             raise ValueError(f"{field} must be set on an evaluated row")
         if not evaluated and row[field] is not None:
             raise ValueError(f"{field} must be null without an eval, got {row[field]!r}")
+    _validate_aif(row, evaluated)
     for field in ("model", "technique", "gpu", "date", "git_sha"):
         if not row[field]:
             raise ValueError(f"{field} must be a non-empty string")
     return row
+
+
+def _validate_aif(row: dict, evaluated: bool) -> None:
+    """All four null, or all four set and consistent. Native has nothing to be paired with."""
+    values = [row[f] for f in _AIF_FIELDS]
+    if all(v is None for v in values):
+        return
+    if any(v is None for v in values):
+        raise ValueError(f"{_AIF_FIELDS} must be all set or all null, got {values}")
+    if row["technique"] == "native" or not evaluated:
+        raise ValueError("only an evaluated, non-native row can carry certification fields")
+    count, rate, upper, certified = values
+    if not isinstance(count, int) or isinstance(count, bool) or not 0 <= count <= row["episodes"]:
+        raise ValueError(f"aif_count must be an int in [0, episodes], got {count!r}")
+    if rate != count / row["episodes"]:
+        raise ValueError(f"aif_rate {rate!r} is not aif_count / episodes")
+    if not isinstance(upper, numbers.Real) or not rate <= upper <= 1:
+        raise ValueError(f"aif_upper must be in [aif_rate, 1], got {upper!r}")
+    if not isinstance(certified, bool):
+        raise ValueError(f"certified must be a bool, got {certified!r}")
 
 
 def default_filename(row: dict) -> str:
