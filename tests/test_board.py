@@ -120,7 +120,7 @@ def test_notes_read_as_written_for_the_current_kind_of_rows():
     assert app.notes(rows, rules) == [
         "All speed measured on NVIDIA L40S, batch 1",
         "p50/p99 time one full plan (chunk); π0.5 uses 10 actions per plan, SmolVLA 1",
-        "Success = LIBERO-Object, 100 episodes, seed 1000; "
+        "Success = 100 episodes per suite, seed 1000; "
         "some success runs were on A10/A10G (see column)",
         "Compile time is one-time, first call only",
     ]

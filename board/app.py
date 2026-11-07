@@ -25,7 +25,9 @@ LABEL_CROWDED = 0.06
 # Log axis ticks, labelled in full: 1, 2, 5, 10, 20, 50, ...
 X_TICKS = [m * 10**e for e in range(-1, 5) for m in (1, 2, 5)]
 # The CLAUDE.md rules that describe the measurement; the rest are for people changing the repo.
-METHODOLOGY_RULES = ("Every number", "One result row", "Speed:", "One GPU", "Success:")
+METHODOLOGY_RULES = ("Every number", "Speed:", "Success:")
+# Rules older versions of CLAUDE.md carried; shown when present.
+OPTIONAL_RULES = ("One result row", "One GPU", "Paired evaluation:")
 
 
 def load_rows(results_dir: Path = RESULTS_DIR) -> list[dict]:
@@ -151,7 +153,11 @@ def chart(rows: list[dict]) -> go.Figure:
                 name=model_name(model),
                 text=[r["technique"] for r in points],
                 textposition=_label_positions([actions_per_second(r) for r in points]),
-                marker={"color": color, "size": 10, "line": {"color": "#fcfcfb", "width": 2}},
+                marker={
+                    "color": color,
+                    "size": 10,
+                    "line": {"color": "#fcfcfb", "width": 2},
+                },
                 customdata=[_success_text(r) for r in points],
                 hovertemplate=(
                     "<b>%{text}</b><br>%{x:.1f} actions/s<br>%{customdata}"
@@ -160,7 +166,11 @@ def chart(rows: list[dict]) -> go.Figure:
             )
         )
     fig.update_layout(
-        xaxis={"title": "Actions per second (log scale)", "type": "log", "tickvals": X_TICKS},
+        xaxis={
+            "title": "Actions per second (log scale)",
+            "type": "log",
+            "tickvals": X_TICKS,
+        },
         yaxis={"title": "Success % (95% CI)"},
         legend={"orientation": "h", "y": 1.08, "x": 0},
         paper_bgcolor="#fcfcfb",
@@ -198,15 +208,19 @@ def notes(rows: list[dict], rules_text: str) -> list[str]:
     if not rows:
         return []
     speed = re.search(r"batch (\d+)", _rule(rules_text, "Speed:"))
-    success = re.fullmatch(r"Success: ([^,]+), .*seed (\d+)\.", _rule(rules_text, "Success:"))
-    suite, seed = success.groups()
+    success_rule = _rule(rules_text, "Success:")
+    seed = re.search(r"seed (\d+)", success_rule).group(1)
+    suite = re.match(r"Success: ([^,]+), \d+ episodes", success_rule)  # older wording names it
 
     first, *others = [
         (model_name(m), _slash(r["n_action_steps"] for r in rows if r["model"] == m))
         for m in sorted({r["model"] for r in rows})
     ]
     chunk_note = ", ".join(
-        [f"{first[0]} uses {first[1]} actions per plan", *(f"{m} {n}" for m, n in others)]
+        [
+            f"{first[0]} uses {first[1]} actions per plan",
+            *(f"{m} {n}" for m, n in others),
+        ]
     )
     speed_gpus = {r["gpu"] for r in rows}
     result = [
@@ -216,8 +230,11 @@ def notes(rows: list[dict], rules_text: str) -> list[str]:
 
     evaluated = [r for r in rows if r.get("episodes")]
     if evaluated:
+        episodes = _slash(r["episodes"] for r in evaluated)
         success_note = (
-            f"Success = {suite}, {_slash(r['episodes'] for r in evaluated)} episodes, seed {seed}"
+            f"Success = {suite.group(1)}, {episodes} episodes, seed {seed}"
+            if suite
+            else f"Success = {episodes} episodes per suite, seed {seed}"
         )
         elsewhere = {r["success_gpu"] for r in evaluated} - speed_gpus
         if elsewhere:
@@ -229,7 +246,11 @@ def notes(rows: list[dict], rules_text: str) -> list[str]:
 
 
 def methodology(rules_text: str) -> str:
-    rules = "\n".join(f"- {_rule(rules_text, p)}" for p in METHODOLOGY_RULES)
+    optional = [p for p in OPTIONAL_RULES if f"\n- {p}" in f"\n{rules_text}"]
+    prefixes = [
+        p for p in (*METHODOLOGY_RULES, *OPTIONAL_RULES) if p not in OPTIONAL_RULES or p in optional
+    ]
+    rules = "\n".join(f"- {_rule(rules_text, p)}" for p in prefixes)
     return (
         "The rules every row is measured under, read from the repo's "
         f"[CLAUDE.md]({REPO_URL}/blob/main/CLAUDE.md):\n\n{rules}\n\n"
@@ -249,25 +270,17 @@ ABOUT = (
 
 def build_demo(results_dir: Path = RESULTS_DIR, rules_file: Path = RULES_FILE) -> gr.Blocks:
     rows = load_rows(results_dir)
-    rules_text = rules_file.read_text()
     with gr.Blocks(title="onl-bench leaderboard", fill_width=True) as demo:
         gr.Markdown("# onl-bench leaderboard")
-        with gr.Tabs():
-            with gr.Tab("Leaderboard"):
-                gr.Dataframe(
-                    value=table(rows),
-                    datatype=[c[1] for c in COLUMNS],
-                    interactive=False,
-                    wrap=True,
-                    column_widths=COLUMN_WIDTHS,
-                    show_label=False,
-                )
-                gr.Markdown("\n".join(f"- {n}" for n in notes(rows, rules_text)))
-                gr.Plot(chart(rows), show_label=False)
-            with gr.Tab("Methodology"):
-                gr.Markdown(methodology(rules_text))
-            with gr.Tab("About"):
-                gr.Markdown(ABOUT)
+        gr.Dataframe(
+            value=table(rows),
+            datatype=[c[1] for c in COLUMNS],
+            interactive=False,
+            wrap=True,
+            column_widths=COLUMN_WIDTHS,
+            show_label=False,
+        )
+        gr.Plot(chart(rows), show_label=False)
     return demo
 
 

@@ -34,7 +34,7 @@ Speed + LIBERO success benchmarks for VLA policies. One run → one JSON row in 
 | SmolVLA | fp32 | 76.0% (66.8–83.3) | 279.0 | 3.6 | 2,509 | – | A10 |
 | SmolVLA | native | 75.0% (65.7–82.5) | 272.7 | 3.7 | 1,286 | – | A10 |
 
-All speed measured on NVIDIA L40S, batch 1. p50/p99 time one full plan (chunk); π0.5 uses 10 actions per plan, SmolVLA 1. Success = LIBERO-Object, 100 episodes, seed 1000; some success runs were on A10/A10G (see column).
+All speed measured on NVIDIA L40S, batch 1. p50/p99 time one full plan (chunk); π0.5 uses 10 actions per plan, SmolVLA 1. Success = 100 episodes per suite, seed 1000; some success runs were on A10/A10G (see column).
 <!-- results:end -->
 
 ## Run it
